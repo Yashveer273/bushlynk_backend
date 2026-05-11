@@ -31,7 +31,7 @@ async function etaEngine(data) {
 
       const eta = Math.ceil((distanceKm / speedKmph) * 60);
 
-      if (distanceKm < minDistance) {
+      if (distanceKm <= stop.radius) {
         minDistance = distanceKm;
         etaMinutes = eta;
 

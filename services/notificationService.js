@@ -1,116 +1,113 @@
 const {
   messaging,
-  db,
-} = require(
-  "../config/firebase"
-);
+} = require("../config/firebase");
+const { pushToRetryQueue } = require("./fcmRetryQueue.service");
+const { getFcmToken } = require("./fcmCache.service");
 
-async function sendAlert(
-  payload
-) {
+/*
+====================================================
+SEND ALERT - PRODUCTION SAFE VERSION
+====================================================
+*/
 
+async function sendAlert(payload) {
   try {
 
     /*
-    MULTIPLE USERS
+    =====================================
+    MULTIPLE USERS (BATCH SAFE)
+    =====================================
     */
 
-    if (payload.users) {
+    if (payload.users?.length) {
 
-      for (const user of payload.users) {
+      await Promise.all(
+        payload.users.map(async (user) => {
 
-        const userData =
-          await db
-            .ref(
-              `users/${user.userId}`
-            )
-            .once("value");
+          try {
 
-        const token =
-          userData.val()?.fcmToken;
+            // 🔥 FAST TOKEN FETCH (Redis → Firebase fallback)
+            const token = await getFcmToken(user.userId);
 
-        if (!token) continue;
+            if (!token) return;
 
-        await messaging.send({
+            await messaging.send({
+              token,
 
-          token,
+              notification: {
+                title: payload.title,
+                body: payload.body,
+              },
 
-          notification: {
+              data: {
+                type: payload.type,
+                busNumber: String(payload.busNumber),
+              },
+            });
 
-            title:
-              payload.title,
+          } catch (err) {
+            console.log(
+              `FCM send failed for user ${user.userId}:`,
+              err.message
+            );
+             await pushToRetryQueue({
+    userId: user.userId,
+    title: payload.title,
+    body: payload.body,
+    type: payload.type,
+    busNumber: payload.busNumber,
+    retryCount: 0,
+  });
+          }
 
-            body:
-              payload.body,
-          },
-
-          data: {
-
-            type:
-              payload.type,
-
-            busNumber:
-              String(
-                payload.busNumber
-              ),
-          },
-        });
-      }
+        })
+      );
     }
 
     /*
-    SINGLE USER
+    =====================================
+    SINGLE USER MODE
+    =====================================
     */
 
     if (payload.userId) {
 
-      const userData =
-        await db
-          .ref(
-            `users/${payload.userId}`
-          )
-          .once("value");
-
-      const token =
-        userData.val()?.fcmToken;
+      const token = await getFcmToken(payload.userId);
 
       if (!token) return;
 
-      await messaging.send({
+     try {
+  await messaging.send({
+    token,
 
-        token,
+    notification: {
+      title: payload.title,
+      body: payload.body,
+    },
 
-        notification: {
+    data: {
+      type: payload.type,
+      busNumber: String(payload.busNumber),
+    },
+  });
 
-          title:
-            payload.title,
+} catch (err) {
+  console.log("FCM send failed:", err.message);
 
-          body:
-            payload.body,
-        },
-
-        data: {
-
-          type:
-            payload.type,
-
-          busNumber:
-            String(
-              payload.busNumber
-            ),
-        },
-      });
+  await pushToRetryQueue({
+    userId: payload.userId,
+    title: payload.title,
+    body: payload.body,
+    type: payload.type,
+    busNumber: payload.busNumber,
+    retryCount: 0,
+  });
+}
     }
 
   } catch (err) {
-
-    console.log(
-      "Notification Error:",
-      err
-    );
+    console.log("Notification Error:", err.message);
   }
 }
 
-module.exports = {
-  sendAlert,
-};
+module.exports = { sendAlert };

@@ -1,77 +1,112 @@
-const { getNearbyStops } = require("../services/geoQuery.service");
-const { sendAlert } = require("../services/notificationService");
-const redisClient = require("../config/redis");
-const { normalizeLocation } = require("../utils/locationNormalizer");
-const getDistance = require("../utils/distance");
+const PickupPoint = require("../models/PickupPoint");
 
-async function geofenceEngine(data) {
+/*
+====================================================
+GET NEARBY STOPS (PRODUCTION-GRADE)
+====================================================
+
+DESIGN GOALS:
+- Stable under high traffic
+- Works with 2dsphere index correctly
+- Compatible with Kafka + Redis + realtime GPS
+- Returns minimal payload (scalable)
+- Provides distance for ETA + geofence logic
+*/
+
+async function getNearbyStops({
+  schoolId,
+  busNumber,
+  lng,
+  lat,
+  maxDistance = 3000,
+}) {
   try {
-    const { schoolId, busNumber, lat, lng } = data;
-
-    const stops = await getNearbyStops({
-      schoolId,
-      busNumber,
-      lng,
-      lat,
-      maxDistance: 3000,
-    });
-
-    for (const stop of stops) {
-
-      const stopLoc = normalizeLocation(stop.location);
-      if (!stopLoc) continue;
-
-      const distance = getDistance(lat, lng, stopLoc.lat, stopLoc.lng);
-
-      const key = `bus_state:${busNumber}:${stop.pickupPointId}`;
-      const current = await redisClient.get(key);
-
-      let state = null;
-
-      if (distance <= stop.radius && current !== "arrived") {
-        state = "arrived";
-
-        await sendAlert({
-          type: "arrived_stop",
-          users: stop.assignedStudents,
-          title: "Bus Arrived",
-          body: "Bus reached pickup point",
+    const results = await PickupPoint.aggregate([
+      /*
+        STEP 1:
+        Filter base documents early
+        (reduces aggregation workload)
+      */
+      {
+        $match: {
+          schoolId,
           busNumber,
-        });
-      }
+        },
+      },
 
-      else if (distance <= 1000 && !current) {
-        state = "near";
+      /*
+        STEP 2:
+        Flatten pickupPoints array
+        so geo query works per point
+      */
+      {
+        $unwind: "$pickupPoints",
+      },
 
-        await sendAlert({
-          type: "near_stop",
-          users: stop.assignedStudents,
-          title: "Bus Near Stop",
-          body: "Bus is 1 KM away",
-          busNumber,
-        });
-      }
+      /*
+        STEP 3:
+        GEO QUERY (2dsphere optimized)
+      */
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: [lng, lat],
+          },
+          key: "pickupPoints.location",
+          distanceField: "distance",
+          maxDistance,
+          spherical: true,
+        },
+      },
 
-      else if (distance > stop.radius + 100 && current === "arrived") {
-        state = "left";
+      /*
+        STEP 4:
+        Project only required fields
+        (CRITICAL for high-load systems)
+      */
+      {
+        $project: {
+          _id: 0,
+          pickupPointId: "$pickupPoints.pickupPointId",
+          name: "$pickupPoints.name",
+          location: "$pickupPoints.location",
+          assignedStudents: "$pickupPoints.assignedStudents",
+          radius: 1,
+          distance: 1,
+        },
+      },
 
-        await sendAlert({
-          type: "left_stop",
-          users: stop.assignedStudents,
-          title: "Bus Left Stop",
-          body: "Bus departed",
-          busNumber,
-        });
-      }
+      /*
+        STEP 5:
+        Sort by nearest first (important for ETA)
+      */
+      {
+        $sort: {
+          distance: 1,
+        },
+      },
+    ]);
 
-      if (state && state !== current) {
-        await redisClient.set(key, state, { EX: 1800 });
-      }
-    }
+    /*
+      FINAL OUTPUT SHAPE:
+      [
+        {
+          pickupPointId,
+          name,
+          location,
+          assignedStudents,
+          radius,
+          distance
+        }
+      ]
+    */
 
+    return results;
   } catch (err) {
-    console.log("Geofence Engine Error:", err);
+    console.log("GeoQuery Error:", err);
+    return [];
   }
 }
 
-module.exports = { geofenceEngine };
+module.exports = { getNearbyStops };

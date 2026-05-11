@@ -53,7 +53,7 @@ const pickupPointSchema =
       */
       radius: {
         type: Number,
-        default: 100,
+        default: 150,
       },
 
       /*

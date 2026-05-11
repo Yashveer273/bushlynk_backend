@@ -1,434 +1,362 @@
-// controllers/subscription.controller.js
+const generateId = require("../utils/generateId");
 
-const generateId =
-  require("../utils/generateId");
-
-const SubscriptionPoint =
-  require(
-    "../models/SubscriptionPoint"
-  );
-
-const PickupPoint =
-  require(
-    "../models/PickupPoint"
-  );
+const SubscriptionPoint = require("../models/SubscriptionPoint");
+const PickupPoint = require("../models/PickupPoint");
 
 const {
   addSubscriptionToRedis,
-
   removeSubscriptionFromRedis,
-
   getPickupSubscriptions,
-
-} = require(
-  "../services/redisSubscription.service"
-);
+} = require("../services/redisSubscription.service");
 
 /*
-=====================================
+=====================================================
 1. CREATE SUBSCRIPTION
-=====================================
+=====================================================
+
+📌 PURPOSE:
+Create a new subscription for a parent/user.
+
+📌 WHEN USED:
+- Parent selects custom alert location
+- System starts monitoring bus distance
+
+📌 API:
+POST /subscription/create
+
+📌 REQUEST BODY:
+{
+  "userId": "U12345",
+  "linkedPickupPointId": "PICKUP101",
+  "name": "Near Temple Stop",
+  "location": {
+    "coordinates": [77.1025, 28.7041]
+  },
+  "alerts": {
+    "nearbyAlert": true,
+    "arrivalAlert": true
+  }
+}
 */
+exports.createSubscription = async (req, res) => {
+  try {
+    const {
+      userId,
+      linkedPickupPointId,
+      name,
+      location,
+      alerts,
+    } = req.body;
 
-exports.createSubscription =
-  async (req, res) => {
+    const pickupPoint = await PickupPoint.findOne({
+      pickupPointId: linkedPickupPointId,
+    });
 
-    try {
-
-      const {
-        userId,
-        linkedPickupPointId,
-        child,
-        name,
-        location,
-        radius,
-        alerts,
-        expiresAt,
-      } = req.body;
-
-      /*
-        Validate pickup point
-      */
-
-      const pickupPoint =
-        await PickupPoint.findOne({
-          pickupPointId:
-            linkedPickupPointId,
-        });
-
-      if (!pickupPoint) {
-
-        return res.status(404).json({
-          success: false,
-
-          message:
-            "Pickup point not found",
-        });
-      }
-
-      /*
-        Validate GeoJSON
-      */
-
-      if (
-        !location ||
-        
-        !Array.isArray(
-          location.coordinates
-        )
-      ) {
-
-        return res.status(400).json({
-          success: false,
-
-          message:
-            "Invalid location format",
-        });
-      }
-
-      const subscription =
-        await SubscriptionPoint.create({
-
-          subscriptionId:
-            `SUB-${generateId()}`,
-
-          userId,
-
-          linkedPickupPointId,
-
-          child,
-
-          name,
-
-          location,
-
-          radius,
-
-          alerts,
-
-          expiresAt,
-        });
-
-      /*
-        Cache in Redis
-
-        Used by Kafka geofence workers
-      */
-
-      await addSubscriptionToRedis(
-        subscription
-      );
-
-      return res.status(201).json({
-        success: true,
-
-        message:
-          "Subscription created successfully",
-
-        data: subscription,
-      });
-
-    } catch (err) {
-
-      return res.status(500).json({
+    if (!pickupPoint) {
+      return res.status(404).json({
         success: false,
-        error: err.message,
+        message: "Pickup point not found",
       });
     }
+
+    if (!location || !Array.isArray(location.coordinates)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid location format",
+      });
+    }
+
+    const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
+
+    const subscription = await SubscriptionPoint.create({
+      subscriptionId: `SUB-${generateId()}`,
+      userId,
+      linkedPickupPointId,
+      name,
+      location,
+      alerts: {
+        nearbyAlert: alerts?.nearbyAlert ?? true,
+        arrivalAlert: alerts?.arrivalAlert ?? true,
+      },
+      expiresAt,
+      active: true,
+    });
+
+    await addSubscriptionToRedis(subscription);
+
+    return res.status(201).json({
+      success: true,
+      message: "Subscription created successfully",
+      data: subscription,
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
 };
 
 /*
-=====================================
+=====================================================
 2. UPDATE SUBSCRIPTION
-=====================================
+=====================================================
+
+📌 PURPOSE:
+Update alert settings or subscription details.
+
+📌 API:
+PUT /subscription/update?subscriptionId=SUB-123
+
+📌 REQUEST BODY:
+{
+  "name": "Updated Stop Name",
+  "alerts": {
+    "nearbyAlert": false,
+    "arrivalAlert": true
+  }
+}
 */
+exports.updateSubscription = async (req, res) => {
+  try {
+    const { subscriptionId } = req.query;
+    const updateData = req.body;
 
-exports.updateSubscription =
-  async (req, res) => {
+    delete updateData.subscriptionId;
+    delete updateData.userId;
 
-    try {
+    const subscription = await SubscriptionPoint.findOneAndUpdate(
+      { subscriptionId },
+      updateData,
+      { new: true, runValidators: true }
+    );
 
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: "Subscription not found",
+      });
+    }
+
+    if (subscription.active) {
+      await addSubscriptionToRedis(subscription);
+    } else {
+      await removeSubscriptionFromRedis(
+        subscription.linkedPickupPointId,
+        subscription.subscriptionId
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Subscription updated successfully",
+      data: subscription,
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
+/*
+=====================================================
+3. DELETE SUBSCRIPTION
+=====================================================
+
+📌 API:
+DELETE /subscription/delete?subscriptionId=SUB-123
+
+📌 PURPOSE:
+Hard delete subscription from system + Redis cleanup
+*/
+exports.deleteSubscription = async (req, res) => {
+  try {
     const { subscriptionId } = req.query;
 
-      const updateData =
-        req.body;
+    const subscription = await SubscriptionPoint.findOne({
+      subscriptionId,
+    });
 
-      /*
-        Protected fields
-      */
-
-      delete updateData.subscriptionId;
-
-      delete updateData.userId;
-
-      const subscription =
-        await SubscriptionPoint.findOneAndUpdate(
-          {
-            subscriptionId,
-          },
-          updateData,
-          {
-            new: true,
-            runValidators: true,
-          }
-        );
-
-      if (!subscription) {
-
-        return res.status(404).json({
-          success: false,
-
-          message:
-            "Subscription not found",
-        });
-      }
-
-      /*
-        Sync Redis
-      */
-
-      if (subscription.active) {
-
-        await addSubscriptionToRedis(
-          subscription
-        );
-
-      } else {
-
-        await removeSubscriptionFromRedis(
-          subscription.linkedPickupPointId,
-          subscription.subscriptionId
-        );
-      }
-
-      return res.status(200).json({
-        success: true,
-
-        message:
-          "Subscription updated successfully",
-
-        data: subscription,
-      });
-
-    } catch (err) {
-
-      return res.status(500).json({
+    if (!subscription) {
+      return res.status(404).json({
         success: false,
-        error: err.message,
+        message: "Subscription not found",
       });
     }
+
+    await removeSubscriptionFromRedis(
+      subscription.linkedPickupPointId,
+      subscription.subscriptionId
+    );
+
+    await SubscriptionPoint.findOneAndDelete({
+      subscriptionId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Subscription deleted successfully",
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
 };
 
 /*
-=====================================
-3. DELETE SUBSCRIPTION
-=====================================
-*/
-
-exports.deleteSubscription =
-  async (req, res) => {
-
-    try {
-
-      const { subscriptionId }  =
-        req.query;
-
-      const subscription =
-        await SubscriptionPoint.findOne({
-          subscriptionId,
-        });
-
-      if (!subscription) {
-
-        return res.status(404).json({
-          success: false,
-
-          message:
-            "Subscription not found",
-        });
-      }
-
-      /*
-        Remove from Redis
-      */
-
-      await removeSubscriptionFromRedis(
-        subscription.linkedPickupPointId,
-        subscription.subscriptionId
-      );
-
-      /*
-        Remove from MongoDB
-      */
-
-      await SubscriptionPoint.findOneAndDelete({
-        subscriptionId,
-      });
-
-      return res.status(200).json({
-        success: true,
-
-        message:
-          "Subscription deleted successfully",
-      });
-
-    } catch (err) {
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-    }
-};
-
-/*
-=====================================
+=====================================================
 4. DEACTIVATE SUBSCRIPTION
-=====================================
+=====================================================
+
+📌 API:
+PATCH /subscription/deactivate?subscriptionId=SUB-123
+
+📌 PURPOSE:
+Soft disable subscription (no notifications)
 */
+exports.deactivateSubscription = async (req, res) => {
+  try {
+    const { subscriptionId } = req.query;
 
-exports.deactivateSubscription =
-  async (req, res) => {
+    const subscription = await SubscriptionPoint.findOne({
+      subscriptionId,
+    });
 
-    try {
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: "Subscription not found",
+      });
+    }
 
-      const { subscriptionId }  =
-        req.query;
+    subscription.active = false;
+    await subscription.save();
 
-      const subscription =
-        await SubscriptionPoint.findOne({
-          subscriptionId,
-        });
+    await removeSubscriptionFromRedis(
+      subscription.linkedPickupPointId,
+      subscription.subscriptionId
+    );
 
-      if (!subscription) {
+    return res.status(200).json({
+      success: true,
+      message: "Subscription deactivated",
+    });
 
-        return res.status(404).json({
-          success: false,
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+};
 
-          message:
-            "Subscription not found",
-        });
-      }
+/*
+=====================================================
+5. GET PICKUP SUBSCRIPTIONS
+=====================================================
 
-      subscription.active = false;
+📌 API:
+GET /subscription/pickup?linkedPickupPointId=PICKUP101
 
-      await subscription.save();
+📌 PURPOSE:
+Used by Kafka / geofence engine (REALTIME BUS TRACKING)
+*/
+exports.getPickupSubscriptions = async (req, res) => {
+  try {
+    const { linkedPickupPointId } = req.query;
 
-      /*
-        Remove from Redis
-      */
+    const subscriptions = await getPickupSubscriptions(
+      linkedPickupPointId
+    );
 
+    return res.status(200).json({
+      success: true,
+      count: subscriptions.length,
+      data: subscriptions,
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
+/*
+=====================================================
+6. GET USER SUBSCRIPTIONS
+=====================================================
+
+📌 API:
+GET /subscription/user?userId=U12345
+
+📌 PURPOSE:
+User dashboard subscription listing
+*/
+exports.getUserSubscriptions = async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    const subscriptions = await SubscriptionPoint.find({
+      userId,
+      active: true,
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: subscriptions.length,
+      data: subscriptions,
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
+/*
+=====================================================
+7. AUTO CLEANUP (CRON JOB ONLY)
+=====================================================
+
+📌 PURPOSE:
+Remove expired subscriptions (NO NOTIFICATIONS SENT)
+
+📌 RUN:
+Cron Job (every 30-60 mins recommended)
+*/
+exports.cleanupExpiredSubscriptions = async () => {
+  try {
+    const now = Date.now();
+
+    const expired = await SubscriptionPoint.find({
+      expiresAt: { $lte: now },
+    });
+
+    for (const sub of expired) {
       await removeSubscriptionFromRedis(
-        subscription.linkedPickupPointId,
-        subscription.subscriptionId
+        sub.linkedPickupPointId,
+        sub.subscriptionId
       );
 
-      return res.status(200).json({
-        success: true,
-
-        message:
-          "Subscription deactivated",
-      });
-
-    } catch (err) {
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
+      await SubscriptionPoint.deleteOne({
+        subscriptionId: sub.subscriptionId,
       });
     }
-};
 
-/*
-=====================================
-5. GET PICKUP SUBSCRIPTIONS
-=====================================
+    console.log("Expired subscriptions cleaned:", expired.length);
 
-Used internally by:
-- Kafka workers
-- geofence engine
-*/
-
-exports.getPickupSubscriptions =
-  async (req, res) => {
-
-    try {
-
-      const { linkedPickupPointId } = req.query;
-      const subscriptions =
-        await getPickupSubscriptions(
-          linkedPickupPointId
-        );
-
-      return res.status(200).json({
-        success: true,
-
-        count:
-          subscriptions.length,
-
-        data: subscriptions,
-      });
-
-    } catch (err) {
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-    }
-};
-
-/*
-=====================================
-GET USER SUBSCRIPTIONS
-=====================================
-
-Returns all active subscriptions
-created by parent/user.
-
-Used in:
-- parent dashboard
-- mobile app
-- subscription management
-*/
-
-exports.getUserSubscriptions =
-  async (req, res) => {
-
-    try {
-
-      const { userId } = req.query;
-
-
-      /*
-        Get active subscriptions
-        for user
-      */
-
-      const subscriptions =
-        await SubscriptionPoint.find({
-          userId,
-          active: true,
-        })
-        .lean()
-        .sort({
-          createdAt: -1,
-        });
-
-      return res.status(200).json({
-        success: true,
-
-        count:
-          subscriptions.length,
-
-        data: subscriptions,
-      });
-
-    } catch (err) {
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-    }
+  } catch (err) {
+    console.log("Cleanup Error:", err);
+  }
 };

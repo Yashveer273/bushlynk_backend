@@ -1,5 +1,5 @@
 const express = require("express");
-
+const { startRetryWorker } = require("./workers/cronRunner");
 const connectDB = require("./config/mongo");
 
 const startConsumer = require("./kafka/consumer");
@@ -51,7 +51,7 @@ async function startServer() {
     =====================================
     */
     await startConsumer();
-
+startRetryWorker();
     app.listen(3000, () => {
       console.log("✅ Server started on 3000");
     });

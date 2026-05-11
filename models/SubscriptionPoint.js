@@ -52,10 +52,7 @@ const subscriptionPointSchema =
       /*
         Optional student
       */
-      child: {
-        studentId: String,
-        name: String,
-      },
+      
 
       /*
         Parent custom alert point
@@ -93,7 +90,7 @@ const subscriptionPointSchema =
       */
       radius: {
         type: Number,
-        default: 80,
+        default: 100,
       },
 
       /*

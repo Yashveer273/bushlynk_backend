@@ -56,10 +56,6 @@ exports.addSubscriptionToRedis =
 
           linkedPickupPointId:
             subscription.linkedPickupPointId,
-
-          child:
-            subscription.child,
-
           name:
             subscription.name,
 
