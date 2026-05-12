@@ -27,7 +27,7 @@ async function sendAlert(payload) {
           try {
 
             // 🔥 FAST TOKEN FETCH (Redis → Firebase fallback)
-            const token = await getFcmToken(user.userId);
+            const token = await getFcmToken(user.parentId);
 
             if (!token) return;
 
@@ -47,11 +47,11 @@ async function sendAlert(payload) {
 
           } catch (err) {
             console.log(
-              `FCM send failed for user ${user.userId}:`,
+              `FCM send failed for user ${user.parentId}:`,
               err.message
             );
              await pushToRetryQueue({
-    userId: user.userId,
+    parentId: user.parentId,
     title: payload.title,
     body: payload.body,
     type: payload.type,
@@ -70,9 +70,9 @@ async function sendAlert(payload) {
     =====================================
     */
 
-    if (payload.userId) {
+    if (payload.parentId) {
 
-      const token = await getFcmToken(payload.userId);
+      const token = await getFcmToken(payload.parentId);
 
       if (!token) return;
 
@@ -95,7 +95,7 @@ async function sendAlert(payload) {
   console.log("FCM send failed:", err.message);
 
   await pushToRetryQueue({
-    userId: payload.userId,
+    parentId: payload.parentId,
     title: payload.title,
     body: payload.body,
     type: payload.type,

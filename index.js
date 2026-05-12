@@ -19,7 +19,7 @@ app.use("/api", require("./routes/location"));
 
 app.use("/api/school", require("./routes/school.routes"));
 app.use("/api/driver", require("./routes/driver.routes"));
-app.use("/api/user", require("./routes/user.routes"));
+app.use("/api/student", require("./routes/user.routes"));
 app.use("/api/bus", require("./routes/bus.routes"));
 app.use("/api/subscription", require("./routes/subscription.routes"));
 app.use("/api/bus", require("./routes/bus.routes"));

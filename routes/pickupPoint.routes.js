@@ -38,7 +38,7 @@ Thunder Client Body:
 
     "assignedStudents": [
       {
-        "userId": "USR001"
+        "parentId": "PAR001"
       }
     ]
   }
@@ -66,7 +66,7 @@ Thunder Client Body:
   "pickupPointId": "PP001",
 
   "student": {
-    "userId": "USR002"
+    "parentId": "PAR002"
   }
 }
 */
@@ -91,7 +91,7 @@ Thunder Client Body:
 
   "pickupPointId": "PP001",
 
-  "userId": "USR002"
+  "parentId": "PAR002"
 }
 */
 

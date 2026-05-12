@@ -1,10 +1,19 @@
 const { Kafka } = require("kafkajs");
-const { processLocation } = require("../services/locationService");
-const redisClient = require("../config/redis");
+
+const { processLocation } =
+  require("../services/locationService");
+
+const redisClient =
+  require("../config/redis");
 
 const kafka = new Kafka({
   clientId: "bus-system",
+
   brokers: ["localhost:9092"],
+
+  retry: {
+    retries: 10,
+  },
 });
 
 const consumer = kafka.consumer({
@@ -13,51 +22,120 @@ const consumer = kafka.consumer({
 
 /*
 ==================================================
-START CONSUMER (OPTIMIZED)
+START CONSUMER
 ==================================================
 */
 
 async function startConsumer() {
-  await consumer.connect();
-  await consumer.subscribe({ topic: "bus-location" });
 
-  /*
-  ==================================================
-  STEP 1: INGEST KAFKA → STORE LATEST STATE ONLY
-  ==================================================
-  */
+  try {
 
-  await consumer.run({
-    eachMessage: async ({ message }) => {
-      const data = JSON.parse(message.value.toString());
+    await consumer.connect();
 
-      const key = `bus:latest:${data.busNumber}`;
+    console.log(
+      "✅ Kafka Consumer Connected"
+    );
+
+    await consumer.subscribe({
+      topic: "bus-location",
+
+      fromBeginning: false,
+    });
+
+    /*
+    ==================================================
+    REALTIME LOCATION PROCESSING
+    ==================================================
+    */
+
+    await consumer.run({
 
       /*
-      Redis SET with overwrite (latest state only)
+      Better throughput
       */
-      await redisClient.set(key, JSON.stringify(data), {
-        EX: 60,
-      });
+      partitionsConsumedConcurrently: 3,
 
-      /*
-      🔥 IMPORTANT OPTIMIZATION:
-      Immediately trigger processing instead of polling
-      */
-      await processLocation(data);
-    },
-  });
+      eachMessage: async ({
+        topic,
+        partition,
+        message,
+      }) => {
 
-  /*
-  ==================================================
-  STEP 2 (REMOVED POLLING LOOP)
-  ==================================================
-  WHY REMOVED:
-  - keys() was killing performance
-  - unnecessary Redis scanning
-  - Kafka already gives stream
-  */
+        try {
 
+          if (!message?.value) {
+            return;
+          }
+
+          const data =
+            JSON.parse(
+              message.value.toString()
+            );
+
+          /*
+          ============================================
+          VALIDATION
+          ============================================
+          */
+
+          if (
+            !data.schoolId ||
+            !data.busNumber ||
+            data.lat === undefined ||
+            data.lng === undefined
+          ) {
+
+            console.log(
+              "❌ Invalid Kafka Payload"
+            );
+
+            return;
+          }
+
+          /*
+          ============================================
+          STORE LATEST LOCATION
+          ============================================
+          */
+
+          const redisKey =
+            `bus:latest:${data.schoolId}:${data.busNumber}`;
+
+          await redisClient.set(
+            redisKey,
+
+            JSON.stringify(data),
+
+            {
+              EX: 120,
+            }
+          );
+
+          /*
+          ============================================
+          PROCESS LOCATION
+          ============================================
+          */
+
+          await processLocation(data);
+
+        } catch (err) {
+
+          console.log(
+            "Kafka Processing Error:",
+            err.message
+          );
+        }
+      },
+    });
+
+  } catch (err) {
+
+    console.log(
+      "Kafka Consumer Start Error:",
+      err.message
+    );
+  }
 }
 
 module.exports = startConsumer;

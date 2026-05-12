@@ -1,54 +1,129 @@
-const generateId = require("../utils/generateId");
-
 const School = require("../models/School");
 
 /*
-  Register school
+==================================================
+REGISTER SCHOOL
+==================================================
 */
+
 exports.registerSchool = async (req, res) => {
+
   try {
+
     const {
+      schoolId,
       name,
       address,
       contact,
-
-      schoolId,
     } = req.body;
+
+    /*
+    =========================================
+    VALIDATION
+    =========================================
+    */
+
     if (
       !schoolId ||
-      schoolId.trim() === "" ||
       !name ||
-      name.trim() === "" ||
       !address ||
-      address.trim() === "" ||
-      !contact ||
-      contact.trim() === ""
+      !contact
     ) {
+
       return res.status(400).json({
+
         success: false,
-        error: "schoolId is required",
+
+        message:
+          "schoolId, name, address and contact are required",
       });
     }
-    const school = await School.create({
-      schoolId: `SCH-${schoolId}`,
 
-      name,
+    /*
+    =========================================
+    NORMALIZE SCHOOL ID
+    =========================================
+    */
 
-      address,
+    let formattedSchoolId =
+      schoolId.trim().toUpperCase();
 
-      contact,
-    });
+    // prevent SCH-SCH001
+    if (
+      !formattedSchoolId.startsWith("SCH-")
+    ) {
 
-    res.status(201).json({
+      formattedSchoolId =
+        `SCH-${formattedSchoolId}`;
+    }
+
+    /*
+    =========================================
+    CHECK DUPLICATE SCHOOL
+    =========================================
+    */
+
+    const existingSchool =
+      await School.findOne({
+
+        schoolId:
+          formattedSchoolId,
+      });
+
+    if (existingSchool) {
+
+      return res.status(409).json({
+
+        success: false,
+
+        message:
+          "School already exists",
+      });
+    }
+
+    /*
+    =========================================
+    CREATE SCHOOL
+    =========================================
+    */
+
+    const school =
+      await School.create({
+
+        schoolId:
+          formattedSchoolId,
+
+        name:
+          name.trim(),
+
+        address:
+          address.trim(),
+
+        contact:
+          contact.trim(),
+      });
+
+    return res.status(201).json({
+
       success: true,
-      message: "School registered",
 
-      data: school,
+      message:
+        "School registered successfully",
+
+      data:
+        school,
     });
+
   } catch (err) {
-    res.status(500).json({
+
+    console.log(err);
+
+    return res.status(500).json({
+
       success: false,
-      error: err.message,
+
+      error:
+        err.message,
     });
   }
 };

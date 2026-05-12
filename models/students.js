@@ -1,13 +1,25 @@
 const mongoose = require("mongoose");
 
-const Studentschema = new mongoose.Schema(
+const StudentSchema = new mongoose.Schema(
   {
-    userId: {
+    /*
+    =========================================
+    PARENT ID
+    =========================================
+    */
+
+    parentId: {
       type: String,
       required: true,
       unique: true,
       index: true,
     },
+
+    /*
+    =========================================
+    SCHOOL
+    =========================================
+    */
 
     schoolId: {
       type: String,
@@ -16,54 +28,104 @@ const Studentschema = new mongoose.Schema(
     },
 
     /*
-      Parent information
+    =========================================
+    PARENT INFORMATION
+    =========================================
     */
+
     parent: {
-      name: String,
-      phone: String,
-      email: String,
+
+      name: {
+        type: String,
+        required: true,
+      },
+
+      phone: {
+        type: String,
+        required: true,
+      },
+
+    
     },
 
     /*
-      Child/student information
+    =========================================
+    MULTIPLE CHILDREN
+    =========================================
     */
-    child: {
-      studentId: String,
-      name: String,
-      class: String,
-      section: String,
-      rollNumber: String,
-    },
+
+    children: [
+
+      {
+
+        /*
+        CHILD INFORMATION
+        */
+
+        childId: {
+          type: String,
+          required: true,
+        },
+
+        studentId: {
+          type: String,
+          required: true,
+        },
+
+        name: {
+          type: String,
+          required: true,
+        },
+
+        class: {
+          type: String,
+          required: true,
+        },
+
+        section: {
+          type: String,
+          required: true,
+        },
+
+        rollNumber: {
+          type: String,
+          required: true,
+        },
+
+        /*
+        BUS FOR THIS CHILD
+        */
+
+        busNumber: {
+          type: String,
+          required: true,
+        },
+
+        /*
+        PICKUP POINT FOR THIS CHILD
+        */
+
+        pickupPointId: {
+          type: String,
+          default: null,
+        },
+
+        status: {
+
+          active: {
+            type: Boolean,
+            default: true,
+          },
+        },
+      },
+    ],
 
     /*
-      Connected bus
+    =========================================
+    FCM TOKEN
+    =========================================
     */
-    busNumber: {
-      type: String,
-      required: true,
-      index: true,
-    },
-
-    /*
-      Default pickup point
-    */
-    pickupPointId: {
-      type: String,
-      default: null,
-    },
-
-    /*
-      Firebase notification token
-    */
-    fcmToken: {
-      type: String,
-      default: null,
-    },
-
-    /*
-      OTP for parent login
-    */
-    otp: {
+ otp: {
       code: String,
       expiresAt: Date,
       attempts: {
@@ -71,13 +133,25 @@ const Studentschema = new mongoose.Schema(
         default: 0,
       },
     },
+    fcmToken: {
+      type: String,
+      default: null,
+    },
+
+    /*
+    =========================================
+    ACCOUNT STATUS
+    =========================================
+    */
 
     status: {
+
       active: {
         type: Boolean,
         default: true,
       },
     },
+
   },
   {
     timestamps: true,
@@ -85,17 +159,6 @@ const Studentschema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model(
-  "User",
-  Studentschema
+  "Students",
+  StudentSchema
 );
-
-/*
-WHY:
-
-Each parent + child:
-- connected to school
-- connected to bus
-- connected to pickup point
-
-Perfect for dashboard filtering
-*/

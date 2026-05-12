@@ -1,13 +1,45 @@
-const redis = require("../config/redis");
+const redis =
+require("../config/redis");
 
-async function pushToRetryQueue(payload) {
-  await redis.lPush(
-    "fcm:retry:queue",
-    JSON.stringify({
-      ...payload,
-      createdAt: Date.now(),
-    })
-  );
+/*
+====================================================
+FCM RETRY QUEUE
+====================================================
+*/
+
+async function pushToRetryQueue(
+  payload
+) {
+
+  try {
+
+    if (!payload) return;
+
+    await redis.lPush(
+
+      "fcm:retry:queue",
+
+      JSON.stringify({
+
+        ...payload,
+
+        retryCount:
+          payload.retryCount || 0,
+
+        createdAt:
+          Date.now(),
+      })
+    );
+
+  } catch (err) {
+
+    console.log(
+      "Retry Queue Error:",
+      err.message
+    );
+  }
 }
 
-module.exports = { pushToRetryQueue };
+module.exports = {
+  pushToRetryQueue,
+};

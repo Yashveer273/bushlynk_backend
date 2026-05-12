@@ -136,7 +136,7 @@ const pickupPointSchema =
           */
           assignedStudents: [
             {
-              userId: {
+              parentId: {
                 type: String,
                 required: true,
               },

@@ -1,40 +1,80 @@
 const redis = require("../config/redis");
-const { sendAlert } = require("../services/notificationService");
+
+const {
+  sendAlert,
+} = require("../services/notificationService");
 
 /*
 ====================================================
-FCM RETRY WORKER (CRON OR BACKGROUND PROCESS)
+FCM RETRY WORKER
 ====================================================
 */
 
 async function processRetryQueue() {
+
   try {
 
-    // Get 1 failed job at a time (safe for scale)
-    const jobData = await redis.rPop("fcm:retry:queue");
+    const jobData =
+      await redis.rPop(
+        "fcm:retry:queue"
+      );
 
     if (!jobData) return;
 
-    const job = JSON.parse(jobData);
+    const job =
+      JSON.parse(jobData);
 
-    // ❌ stop after 3 retries
+    /*
+    Max retry limit
+    */
+
     if (job.retryCount >= 3) {
-      console.log("❌ Dropped FCM after max retries:", job);
+
+      console.log(
+        "❌ Dropped FCM after max retries:",
+        job
+      );
+
       return;
     }
 
-    // retry again using your existing system
+    /*
+    Retry send
+    */
+
     await sendAlert({
-      userId: job.userId,
-      title: job.title,
-      body: job.body,
-      type: job.type,
-      busNumber: job.busNumber,
+
+      parentId:
+        job.parentId,
+
+      title:
+        job.title,
+
+      body:
+        job.body,
+
+      type:
+        job.type,
+
+      busNumber:
+        job.busNumber,
     });
 
+    /*
+    Increment retry count
+    */
+
+    job.retryCount += 1;
+
   } catch (err) {
-    console.log("Retry Worker Error:", err.message);
+
+    console.log(
+      "Retry Worker Error:",
+      err.message
+    );
   }
 }
 
-module.exports = { processRetryQueue };
+module.exports = {
+  processRetryQueue,
+};

@@ -1,10 +1,20 @@
-const { getSubscriptionPoints } = require("../services/loadpicups_in_redis");
-const getDistance = require("../utils/distance");
-const { sendAlert } = require("../services/sendAlert");
-const { normalizeLocation } = require("../utils/locationNormalizer");
-const { canSendAlert } = require("../utils/alertDeduplicator");
+const { getSubscriptionPoints } =
+require("../services/loadpicups_in_redis");
 
-// ✅ ADD THIS (IMPORTANT)
+const getDistance =
+require("../utils/distance");
+
+const { sendAlert } =
+require("../services/sendAlert");
+
+const {
+  normalizeLocation,
+} = require("../utils/locationNormalizer");
+
+const {
+  canSendAlert,
+} = require("../utils/alertDeduplicator");
+
 const {
   wasInsideZone,
   setInsideZone,
@@ -13,125 +23,231 @@ const {
 
 /*
 =====================================================
-SUBSCRIPTION ENGINE (CLEAN + PROTECTED)
+SUBSCRIPTION ENGINE
+(PRODUCTION SAFE)
 =====================================================
-Triggers:
-- NEARBY ALERT (3x radius)
-- ARRIVAL ALERT (inside radius)
+
+FEATURES:
+- Multi child safe
+- Multi bus safe
+- No repeated alerts
+- Separate nearby/arrival zones
+- Parent-level isolation
+- Redis scalable
 =====================================================
 */
 
 async function subscriptionEngine(data) {
-  try {
-    const { busNumber, lat, lng } = data;
 
-    const subs = await getSubscriptionPoints(busNumber);
+  try {
+
+    const {
+      busNumber,
+      lat,
+      lng,
+    } = data;
+
+    const subs =
+      await getSubscriptionPoints(
+        busNumber
+      );
 
     for (const sub of subs) {
 
       /*
-      ======================================
-      1. BASIC VALIDATION
-      ======================================
+      =====================================
+      BASIC VALIDATION
+      =====================================
       */
-      if (!sub || !sub.active) continue;
+
+      if (!sub) continue;
+
+      if (!sub.active) continue;
+
       if (!sub.alerts) continue;
 
-      const loc = normalizeLocation(sub.location);
+      if (!sub.childId) continue;
+
+      const loc =
+        normalizeLocation(
+          sub.location
+        );
+
       if (!loc) continue;
 
-      const distance = getDistance(lat, lng, loc.lat, loc.lng);
+      /*
+      =====================================
+      DISTANCE
+      =====================================
+      */
 
-      const zoneKey = sub.subscriptionId;
+      const distance =
+        getDistance(
+          lat,
+          lng,
+          loc.lat,
+          loc.lng
+        );
 
       /*
-      ======================================
-      2. ARRIVAL ALERT (FIXED - NO REPEAT)
-      ======================================
+      =====================================
+      GEOFENCE KEYS
+      =====================================
       */
+
+      const arrivalZoneKey =
+        `${sub.subscriptionId}_${sub.childId}_ARRIVAL`;
+
+      const nearbyZoneKey =
+        `${sub.subscriptionId}_${sub.childId}_NEARBY`;
+
+      /*
+      =====================================
+      ARRIVAL ALERT
+      =====================================
+      */
+
       if (
         sub.alerts.arrivalAlert &&
         distance <= sub.radius
       ) {
 
-        const alreadyInside = await wasInsideZone(
-          busNumber,
-          zoneKey
-        );
+        const alreadyInside =
+          await wasInsideZone(
+            busNumber,
+            arrivalZoneKey
+          );
 
-        // ❌ prevent repeat alerts
-        if (alreadyInside) continue;
+        if (!alreadyInside) {
 
-        const allowed = await canSendAlert(
-          busNumber,
-          sub.subscriptionId,
-          "SUB_ARRIVAL"
-        );
+          const allowed =
+            await canSendAlert(
+              busNumber,
+              arrivalZoneKey,
+              "SUB_ARRIVAL"
+            );
 
-        if (!allowed) continue;
+          if (allowed) {
 
-        await sendAlert({
-          type: "SUB_ARRIVAL",
-          userId: sub.userId,
-          title: "Bus Arrived Near Your Stop",
-          body: "Your bus has reached your pickup area",
-          busNumber,
-        });
+            await sendAlert({
 
-        // ✅ mark state
-        await setInsideZone(busNumber, zoneKey);
+              type:
+                "SUB_ARRIVAL",
 
-        continue;
+              parentId:
+                sub.parentId,
+
+              childId:
+                sub.childId,
+
+              title:
+                "Bus Arrived Near Stop 🚍",
+
+              body:
+                `${sub.childName}'s bus has arrived near pickup point`,
+
+              busNumber,
+            });
+
+            await setInsideZone(
+              busNumber,
+              arrivalZoneKey
+            );
+          }
+        }
       }
 
       /*
-      ======================================
-      3. BUS EXIT RESET
-      ======================================
+      =====================================
+      NEARBY ALERT
+      =====================================
       */
-      if (distance > sub.radius) {
-        await clearZone(busNumber, zoneKey);
-      }
 
-      /*
-      ======================================
-      4. NEARBY ALERT (CONTROLLED)
-      ======================================
-      */
-      if (
+      else if (
+
         sub.alerts.nearbyAlert &&
+
         distance <= sub.radius * 3
+
       ) {
 
-        const alreadyInside = await wasInsideZone(
+        const alreadyInside =
+          await wasInsideZone(
+            busNumber,
+            nearbyZoneKey
+          );
+
+        if (!alreadyInside) {
+
+          const allowed =
+            await canSendAlert(
+              busNumber,
+              nearbyZoneKey,
+              "SUB_NEARBY"
+            );
+
+          if (allowed) {
+
+            await sendAlert({
+
+              type:
+                "SUB_NEARBY",
+
+              parentId:
+                sub.parentId,
+
+              childId:
+                sub.childId,
+
+              title:
+                "Bus is Approaching ⚡",
+
+              body:
+                `${sub.childName}'s bus is approaching pickup point`,
+
+              busNumber,
+            });
+
+            await setInsideZone(
+              busNumber,
+              nearbyZoneKey
+            );
+          }
+        }
+      }
+
+      /*
+      =====================================
+      FULL EXIT RESET
+      =====================================
+      */
+
+      if (
+        distance >
+        sub.radius * 3
+      ) {
+
+        await clearZone(
           busNumber,
-          zoneKey
+          arrivalZoneKey
         );
 
-        // ❌ prevent spam while inside zone
-        if (alreadyInside) continue;
-
-        const allowed = await canSendAlert(
+        await clearZone(
           busNumber,
-          sub.subscriptionId,
-          "SUB_NEARBY"
+          nearbyZoneKey
         );
-
-        if (!allowed) continue;
-
-        await sendAlert({
-          type: "SUB_NEARBY",
-          userId: sub.userId,
-          title: "Bus is Approaching",
-          body: "Your bus is nearby your location",
-          busNumber,
-        });
       }
     }
 
   } catch (err) {
-    console.log("Subscription Engine Error:", err);
+
+    console.log(
+      "Subscription Engine Error:",
+      err
+    );
   }
 }
 
-module.exports = { subscriptionEngine };
+module.exports = {
+  subscriptionEngine,
+};

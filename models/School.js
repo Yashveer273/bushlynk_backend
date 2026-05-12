@@ -34,7 +34,7 @@ const schoolSchema = new mongoose.Schema(
 
     Students: [
       {
-        userId: String,
+        parentId: String,
       },
     ],
 

@@ -1,38 +1,75 @@
-const PickupPoint = require("../models/PickupPoint");
-const SubscriptionPoint = require("../models/SubscriptionPoint");
-const redisClient = require("../config/redis");
-const { normalizeLocation } = require("../utils/locationNormalizer");
+const PickupPoint =
+require("../models/PickupPoint");
+
+const SubscriptionPoint =
+require("../models/SubscriptionPoint");
+
+const redisClient =
+require("../config/redis");
+
+const {
+  normalizeLocation,
+} = require("../utils/locationNormalizer");
 
 /*
 ========================================================
 LOAD PICKUP POINTS
 ========================================================
 */
+
 async function loadPickupPoints() {
+
   try {
-    const docs = await PickupPoint.find();
+
+    const docs =
+      await PickupPoint.find();
 
     for (const doc of docs) {
-      const key = `pickup_points:${doc.schoolId}:${doc.busNumber}`;
 
-      const formatted = doc.pickupPoints
-        .map((p) => ({
-          pickupPointId: p.pickupPointId,
-          name: p.name,
+      const key =
+        `pickup_points:${doc.schoolId}:${doc.busNumber}`;
 
-          location: normalizeLocation(p.location), // ✅ FIXED
+      const formatted =
+        doc.pickupPoints
 
-          radius: doc.radius,
-          assignedStudents: p.assignedStudents,
-        }))
-        .filter(Boolean);
+          .map((p) => ({
 
-      await redisClient.set(key, JSON.stringify(formatted));
+            pickupPointId:
+              p.pickupPointId,
+
+            name:
+              p.name,
+
+            location:
+              normalizeLocation(
+                p.location
+              ),
+
+            radius:
+              doc.radius || 150,
+
+            assignedStudents:
+              p.assignedStudents || [],
+          }))
+
+          .filter(Boolean);
+
+      await redisClient.set(
+        key,
+        JSON.stringify(formatted)
+      );
     }
 
-    console.log("✅ Pickup points loaded");
+    console.log(
+      "✅ Pickup points loaded"
+    );
+
   } catch (err) {
-    console.log("Pickup load error:", err);
+
+    console.log(
+      "Pickup load error:",
+      err.message
+    );
   }
 }
 
@@ -41,69 +78,155 @@ async function loadPickupPoints() {
 LOAD SUBSCRIPTIONS
 ========================================================
 */
+
 async function loadSubscriptionPoints() {
+
   try {
-    const subs = await SubscriptionPoint.find({ active: true });
+
+    const subs =
+      await SubscriptionPoint.find({
+        active: true,
+      });
 
     const grouped = {};
 
     for (const sub of subs) {
-      const key = `bus_subscriptions:${sub.busNumber}`;
 
-      if (!grouped[key]) grouped[key] = [];
+      const key =
+        `bus_subscriptions:${sub.busNumber}`;
+
+      if (!grouped[key]) {
+        grouped[key] = [];
+      }
 
       grouped[key].push({
-        subscriptionId: sub.subscriptionId,
-        userId: sub.userId,
-        linkedPickupPointId: sub.linkedPickupPointId,
-        name: sub.name,
 
-        location: normalizeLocation(sub.location), // ✅ FIXED
+        subscriptionId:
+          sub.subscriptionId,
 
-        radius: sub.radius,
-        alerts: sub.alerts,
-        expiresAt: sub.expiresAt,
+        parentId:
+          sub.parentId,
+
+        childId:
+          sub.childId,
+
+        childName:
+          sub.childName,
+
+        linkedPickupPointId:
+          sub.linkedPickupPointId,
+
+        name:
+          sub.name,
+
+        location:
+          normalizeLocation(
+            sub.location
+          ),
+
+        radius:
+          sub.radius || 150,
+
+        alerts:
+          sub.alerts,
+
+        active:
+          sub.active,
+
+        expiresAt:
+          sub.expiresAt,
       });
     }
 
     for (const key in grouped) {
-      await redisClient.set(key, JSON.stringify(grouped[key]));
+
+      await redisClient.set(
+
+        key,
+
+        JSON.stringify(
+          grouped[key]
+        )
+      );
     }
 
-    console.log("✅ Subscriptions loaded");
+    console.log(
+      "✅ Subscriptions loaded"
+    );
+
   } catch (err) {
-    console.log("Subscription load error:", err);
+
+    console.log(
+      "Subscription load error:",
+      err.message
+    );
   }
 }
 
 /*
 ========================================================
-GETTERS
+GET PICKUP POINTS
 ========================================================
 */
-async function getPickupPoints(schoolId, busNumber) {
+
+async function getPickupPoints(
+  schoolId,
+  busNumber
+) {
+
   try {
-    const key = `pickup_points:${schoolId}:${busNumber}`;
-    const data = await redisClient.get(key);
-    return data ? JSON.parse(data) : [];
+
+    const key =
+      `pickup_points:${schoolId}:${busNumber}`;
+
+    const data =
+      await redisClient.get(key);
+
+    return data
+      ? JSON.parse(data)
+      : [];
+
   } catch {
+
     return [];
   }
 }
 
-async function getSubscriptionPoints(busNumber) {
+/*
+========================================================
+GET SUBSCRIPTIONS
+========================================================
+*/
+
+async function getSubscriptionPoints(
+  busNumber
+) {
+
   try {
-    const key = `bus_subscriptions:${busNumber}`;
-    const data = await redisClient.get(key);
-    return data ? JSON.parse(data) : [];
+
+    const key =
+      `bus_subscriptions:${busNumber}`;
+
+    const data =
+      await redisClient.get(key);
+
+    return data
+      ? JSON.parse(data)
+      : [];
+
   } catch {
+
     return [];
   }
 }
 
 module.exports = {
+
   loadPickupPoints,
+
   loadSubscriptionPoints,
+
   getPickupPoints,
+
   getSubscriptionPoints,
 };

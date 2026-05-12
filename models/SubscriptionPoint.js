@@ -21,7 +21,7 @@ const subscriptionPointSchema =
         Subscription belongs to parent,
         not school.
       */
-      userId: {
+      parentId: {
         type: String,
         required: true,
        
@@ -143,7 +143,7 @@ INDEXES
   Fast parent lookup
 */
 subscriptionPointSchema.index({
-  userId: 1,
+  parentId: 1,
 });
 
 /*

@@ -1,9 +1,13 @@
-
-
 const Driver = require("../models/Driver");
 const Bus = require("../models/Bus");
 
+/*
+========================================
+1. CREATE DRIVER
+========================================
+*/
 exports.createDriver = async (req, res) => {
+
   try {
 
     const {
@@ -15,16 +19,42 @@ exports.createDriver = async (req, res) => {
     } = req.body;
 
     /*
-      Check existing driver
+    ========================================
+    VALIDATION
+    ========================================
     */
-    const existingDriver = await Driver.findOne({
-      $or: [
-        { driverId },
-        { phone },
-      ],
-    });
+
+    if (
+      !driverId ||
+      !schoolId ||
+      !name ||
+      !phone ||
+      !password
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
+
+    /*
+    ========================================
+    CHECK DUPLICATE DRIVER
+    ========================================
+    */
+
+    const existingDriver =
+      await Driver.findOne({
+
+        $or: [
+          { driverId },
+          { phone },
+        ],
+      });
 
     if (existingDriver) {
+
       return res.status(409).json({
         success: false,
         message: "Driver already exists",
@@ -32,19 +62,25 @@ exports.createDriver = async (req, res) => {
     }
 
     /*
-      Create driver
+    ========================================
+    CREATE DRIVER
+    ========================================
     */
-    const driver = await Driver.create({
-      driverId,
-      schoolId,
-      name,
-      phone,
-      password,
 
-      CurentJob: {},
-    });
+    const driver =
+      await Driver.create({
 
-    res.status(201).json({
+        driverId,
+        schoolId,
+        name,
+        phone,
+        password,
+
+        CurentJob: {},
+      });
+
+    return res.status(201).json({
+
       success: true,
       message: "Driver created successfully",
       data: driver,
@@ -52,38 +88,46 @@ exports.createDriver = async (req, res) => {
 
   } catch (err) {
 
-    /*
-      Mongo duplicate key
-    */
     if (err.code === 11000) {
+
       return res.status(409).json({
         success: false,
         message: "Duplicate driver entry",
       });
     }
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: err.message,
     });
-
   }
 };
 
 
 /*
 ========================================
-REMOVE DRIVER
+2. REMOVE DRIVER
 ========================================
 */
 exports.removeDriver = async (req, res) => {
+
   try {
 
     const { driverId } = req.query;
 
-    const driver = await Driver.findOne({ driverId });
+    if (!driverId) {
+
+      return res.status(400).json({
+        success: false,
+        message: "driverId required",
+      });
+    }
+
+    const driver =
+      await Driver.findOne({ driverId });
 
     if (!driver) {
+
       return res.status(404).json({
         success: false,
         message: "Driver not found",
@@ -91,48 +135,61 @@ exports.removeDriver = async (req, res) => {
     }
 
     /*
-      Prevent delete if active job
+    ========================================
+    PREVENT REMOVE IF ACTIVE
+    ========================================
     */
+
     if (driver.CurentJob?.busNumber) {
+
       return res.status(400).json({
         success: false,
-        message: "Driver currently on active job",
+        message: "Driver currently on active trip",
       });
     }
 
     await Driver.deleteOne({ driverId });
 
-    res.status(200).json({
+    return res.status(200).json({
+
       success: true,
       message: "Driver removed successfully",
     });
 
   } catch (err) {
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: err.message,
     });
-
   }
 };
 
 
 /*
 ========================================
-GET DRIVERS BY SCHOOL ID
+3. GET DRIVERS BY SCHOOL
 ========================================
 */
 exports.getDriversBySchool = async (req, res) => {
+
   try {
 
     const { schoolId } = req.query;
 
-    const drivers = await Driver.find({
-      schoolId,
-    });
+    if (!schoolId) {
 
-    res.status(200).json({
+      return res.status(400).json({
+        success: false,
+        message: "schoolId required",
+      });
+    }
+
+    const drivers =
+      await Driver.find({ schoolId });
+
+    return res.status(200).json({
+
       success: true,
       total: drivers.length,
       data: drivers,
@@ -140,33 +197,44 @@ exports.getDriversBySchool = async (req, res) => {
 
   } catch (err) {
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: err.message,
     });
-
   }
 };
 
 
 /*
 ========================================
-GET DRIVER BY BUS NUMBER
+4. GET DRIVER BY BUS
 ========================================
 */
 exports.getDriverByBus = async (req, res) => {
+
   try {
 
     const { busNumber } = req.query;
 
+    if (!busNumber) {
+
+      return res.status(400).json({
+        success: false,
+        message: "busNumber required",
+      });
+    }
+
     /*
-      Find bus
+    ========================================
+    FIND BUS
+    ========================================
     */
-    const bus = await Bus.findOne({
-      busNumber,
-    });
+
+    const bus =
+      await Bus.findOne({ busNumber });
 
     if (!bus) {
+
       return res.status(404).json({
         success: false,
         message: "Bus not found",
@@ -174,9 +242,13 @@ exports.getDriverByBus = async (req, res) => {
     }
 
     /*
-      Check assigned driver
+    ========================================
+    CHECK ASSIGNED DRIVER
+    ========================================
     */
+
     if (!bus.driverlogin?.driverId) {
+
       return res.status(404).json({
         success: false,
         message: "No driver assigned",
@@ -184,39 +256,48 @@ exports.getDriverByBus = async (req, res) => {
     }
 
     /*
-      Find driver
+    ========================================
+    FIND DRIVER
+    ========================================
     */
-    const driver = await Driver.findOne({
-      driverId: bus.driverlogin.driverId,
-    });
+
+    const driver =
+      await Driver.findOne({
+
+        driverId:
+          bus.driverlogin.driverId,
+      });
 
     if (!driver) {
+
       return res.status(404).json({
         success: false,
         message: "Driver record missing",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
+
       success: true,
       data: driver,
     });
 
   } catch (err) {
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: err.message,
     });
-
   }
 };
 
 
 /*
 ========================================
-START DRIVER JOB
+5. START DRIVER JOB
 ========================================
+
+BODY:
 {
   "schoolId": "SCH001",
   "driverId": "D001",
@@ -225,6 +306,7 @@ START DRIVER JOB
 }
 */
 exports.startDriverJob = async (req, res) => {
+
   try {
 
     const {
@@ -235,15 +317,40 @@ exports.startDriverJob = async (req, res) => {
     } = req.body;
 
     /*
-      Validate driver
+    ========================================
+    VALIDATE INPUTS
+    ========================================
     */
-    const driver = await Driver.findOne({
-      schoolId,
-      driverId,
-      password,
-    });
+
+    if (
+      !schoolId ||
+      !driverId ||
+      !password ||
+      !busNumber
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
+
+    /*
+    ========================================
+    VALIDATE DRIVER
+    ========================================
+    */
+
+    const driver =
+      await Driver.findOne({
+
+        schoolId,
+        driverId,
+        password,
+      });
 
     if (!driver) {
+
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
@@ -251,9 +358,13 @@ exports.startDriverJob = async (req, res) => {
     }
 
     /*
-      Already on job
+    ========================================
+    DRIVER ALREADY ACTIVE
+    ========================================
     */
+
     if (driver.CurentJob?.busNumber) {
+
       return res.status(400).json({
         success: false,
         message: "Driver already on active trip",
@@ -261,14 +372,20 @@ exports.startDriverJob = async (req, res) => {
     }
 
     /*
-      Find bus using UNIQUE busNumber
+    ========================================
+    FIND BUS
+    ========================================
     */
-    const bus = await Bus.findOne({
-      schoolId,
-      busNumber,
-    });
+
+    const bus =
+      await Bus.findOne({
+
+        schoolId,
+        busNumber,
+      });
 
     if (!bus) {
+
       return res.status(404).json({
         success: false,
         message: "Bus not found",
@@ -276,9 +393,13 @@ exports.startDriverJob = async (req, res) => {
     }
 
     /*
-      Check bus already assigned
+    ========================================
+    BUS ALREADY OCCUPIED
+    ========================================
     */
+
     if (bus.driverlogin?.driverId) {
+
       return res.status(400).json({
         success: false,
         message: "Bus already occupied",
@@ -286,12 +407,21 @@ exports.startDriverJob = async (req, res) => {
     }
 
     /*
-      Save in bus schema
+    ========================================
+    ASSIGN DRIVER TO BUS
+    ========================================
     */
+
     bus.driverlogin = {
-      driverId: driver.driverId,
-      driverName: driver.name,
-      assignedAt: new Date(),
+
+      driverId:
+        driver.driverId,
+
+      driverName:
+        driver.name,
+
+      assignedAt:
+        new Date(),
     };
 
     bus.status.tripStarted = true;
@@ -299,20 +429,29 @@ exports.startDriverJob = async (req, res) => {
     await bus.save();
 
     /*
-      Save in driver schema
-
-      busAsignNumber is only
-      for dashboard/log display
+    ========================================
+    SAVE DRIVER CURRENT JOB
+    ========================================
     */
+
     driver.CurentJob = {
-      busNumber: bus.busNumber,
-      busNumber: bus.busNumber,
-      busAsignNumber: bus.busAsignNumber,
+
+      schoolId,
+
+      busNumber:
+        bus.busNumber,
+
+      busAsignNumber:
+        bus.busAsignNumber,
+
+      startedAt:
+        new Date(),
     };
 
     await driver.save();
 
-    res.status(200).json({
+    return res.status(200).json({
+
       success: true,
       message: "Driver job started",
 
@@ -324,30 +463,44 @@ exports.startDriverJob = async (req, res) => {
 
   } catch (err) {
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: err.message,
     });
-
   }
 };
 
 
 /*
 ========================================
-END DRIVER JOB
+6. END DRIVER JOB
 ========================================
 */
 exports.endDriverJob = async (req, res) => {
+
   try {
 
     const { driverId } = req.body;
 
-    const driver = await Driver.findOne({
-      driverId,
-    });
+    if (!driverId) {
+
+      return res.status(400).json({
+        success: false,
+        message: "driverId required",
+      });
+    }
+
+    /*
+    ========================================
+    FIND DRIVER
+    ========================================
+    */
+
+    const driver =
+      await Driver.findOne({ driverId });
 
     if (!driver) {
+
       return res.status(404).json({
         success: false,
         message: "Driver not found",
@@ -355,9 +508,13 @@ exports.endDriverJob = async (req, res) => {
     }
 
     /*
-      Check active job
+    ========================================
+    CHECK ACTIVE JOB
+    ========================================
     */
+
     if (!driver.CurentJob?.busNumber) {
+
       return res.status(400).json({
         success: false,
         message: "No active trip",
@@ -365,11 +522,17 @@ exports.endDriverJob = async (req, res) => {
     }
 
     /*
-      Find bus using UNIQUE busNumber
+    ========================================
+    FIND BUS
+    ========================================
     */
-    const bus = await Bus.findOne({
-      busNumber: driver.CurentJob.busNumber,
-    });
+
+    const bus =
+      await Bus.findOne({
+
+        busNumber:
+          driver.CurentJob.busNumber,
+      });
 
     if (bus) {
 
@@ -381,23 +544,26 @@ exports.endDriverJob = async (req, res) => {
     }
 
     /*
-      Clear driver job
+    ========================================
+    CLEAR DRIVER JOB
+    ========================================
     */
+
     driver.CurentJob = {};
 
     await driver.save();
 
-    res.status(200).json({
+    return res.status(200).json({
+
       success: true,
       message: "Driver job ended",
     });
 
   } catch (err) {
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: err.message,
     });
-
   }
 };

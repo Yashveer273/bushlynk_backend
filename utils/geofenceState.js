@@ -5,9 +5,16 @@ const redis = require("../config/redis");
 CHECK IF BUS WAS ALREADY INSIDE ZONE
 ========================================
 */
+
 async function wasInsideZone(busNumber, pointId) {
-  const key = `zone:state:${busNumber}:${pointId}`;
-  return await redis.get(key);
+
+  const key =
+    `zone:state:${busNumber}:${pointId}`;
+
+  const exists =
+    await redis.get(key);
+
+  return !!exists;
 }
 
 /*
@@ -15,20 +22,30 @@ async function wasInsideZone(busNumber, pointId) {
 MARK BUS AS INSIDE ZONE
 ========================================
 */
-async function setInsideZone(busNumber, pointId) {
-  const key = `zone:state:${busNumber}:${pointId}`;
 
-  // TTL ensures auto cleanup if system crashes
-  await redis.set(key, "1", { EX: 300 }); // 5 minutes
+async function setInsideZone(busNumber, pointId) {
+
+  const key =
+    `zone:state:${busNumber}:${pointId}`;
+
+  await redis.set(
+    key,
+    "1",
+    { EX: 300 }
+  );
 }
 
 /*
 ========================================
-REMOVE ZONE STATE (BUS LEFT)
+REMOVE ZONE STATE
 ========================================
 */
+
 async function clearZone(busNumber, pointId) {
-  const key = `zone:state:${busNumber}:${pointId}`;
+
+  const key =
+    `zone:state:${busNumber}:${pointId}`;
+
   await redis.del(key);
 }
 

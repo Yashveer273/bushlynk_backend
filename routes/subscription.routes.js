@@ -167,8 +167,8 @@ SUCCESS RESPONSE:
       "subscriptionId":
       "SUB-12345",
 
-      "userId":
-      "USR001",
+      "parentId":
+      "PAR001",
 
       "name":
       "Near Temple"
@@ -193,7 +193,7 @@ Parent opens:
 --------------------------------------------------
 
 GET
-/api/subscription/getUserSubscriptionsById?userId=USR001
+/api/subscription/getUserSubscriptionsById?parentId=PAR001
 
 --------------------------------------------------
 

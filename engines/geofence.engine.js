@@ -2,111 +2,172 @@ const PickupPoint = require("../models/PickupPoint");
 
 /*
 ====================================================
-GET NEARBY STOPS (PRODUCTION-GRADE)
+GET NEARBY STOPS (PRODUCTION READY)
 ====================================================
 
-DESIGN GOALS:
-- Stable under high traffic
-- Works with 2dsphere index correctly
-- Compatible with Kafka + Redis + realtime GPS
-- Returns minimal payload (scalable)
-- Provides distance for ETA + geofence logic
+FEATURES:
+- MongoDB 2dsphere optimized
+- Kafka compatible
+- Realtime ETA compatible
+- Geofence compatible
+- Distance in METERS
+- Multi-stop scalable
+====================================================
 */
 
 async function getNearbyStops({
+
   schoolId,
+
   busNumber,
+
   lng,
+
   lat,
-  maxDistance = 3000,
+
+  maxDistance = 5000,
 }) {
+
   try {
-    const results = await PickupPoint.aggregate([
-      /*
-        STEP 1:
-        Filter base documents early
-        (reduces aggregation workload)
-      */
-      {
-        $match: {
-          schoolId,
-          busNumber,
-        },
-      },
 
-      /*
-        STEP 2:
-        Flatten pickupPoints array
-        so geo query works per point
-      */
-      {
-        $unwind: "$pickupPoints",
-      },
+    const results =
+      await PickupPoint.aggregate([
 
-      /*
-        STEP 3:
-        GEO QUERY (2dsphere optimized)
-      */
-      {
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: [lng, lat],
-          },
-          key: "pickupPoints.location",
-          distanceField: "distance",
-          maxDistance,
-          spherical: true,
-        },
-      },
+        /*
+        ==========================================
+        GEO NEAR MUST BE FIRST STAGE
+        ==========================================
+        */
 
-      /*
-        STEP 4:
-        Project only required fields
-        (CRITICAL for high-load systems)
-      */
-      {
-        $project: {
-          _id: 0,
-          pickupPointId: "$pickupPoints.pickupPointId",
-          name: "$pickupPoints.name",
-          location: "$pickupPoints.location",
-          assignedStudents: "$pickupPoints.assignedStudents",
-          radius: 1,
-          distance: 1,
-        },
-      },
-
-      /*
-        STEP 5:
-        Sort by nearest first (important for ETA)
-      */
-      {
-        $sort: {
-          distance: 1,
-        },
-      },
-    ]);
-
-    /*
-      FINAL OUTPUT SHAPE:
-      [
         {
-          pickupPointId,
-          name,
-          location,
-          assignedStudents,
-          radius,
-          distance
-        }
-      ]
-    */
+          $geoNear: {
+
+            near: {
+
+              type: "Point",
+
+              coordinates: [
+                lng,
+                lat,
+              ],
+            },
+
+            /*
+            IMPORTANT:
+            path to geo field
+            */
+
+            key:
+              "pickupPoints.location",
+
+            /*
+            distance in meters
+            */
+
+            distanceField:
+              "distance",
+
+            /*
+            max search radius
+            */
+
+            maxDistance,
+
+            spherical: true,
+
+            /*
+            FILTER INSIDE geoNear
+            */
+
+            query: {
+
+              schoolId,
+
+              busNumber,
+            },
+          },
+        },
+
+        /*
+        ==========================================
+        UNWIND PICKUP POINTS
+        ==========================================
+        */
+
+        {
+          $unwind:
+            "$pickupPoints",
+        },
+
+        /*
+        ==========================================
+        PROJECT MINIMAL DATA
+        ==========================================
+        */
+
+        {
+          $project: {
+
+            _id: 0,
+
+            pickupPointId:
+              "$pickupPoints.pickupPointId",
+
+            name:
+              "$pickupPoints.name",
+
+            location:
+              "$pickupPoints.location",
+
+            assignedStudents:
+              "$pickupPoints.assignedStudents",
+
+            /*
+            DEFAULT RADIUS
+            */
+
+            radius: {
+
+              $ifNull: [
+                "$pickupPoints.radius",
+                150,
+              ],
+            },
+
+            /*
+            Mongo returns meters
+            */
+
+            distance: 1,
+          },
+        },
+
+        /*
+        ==========================================
+        SORT NEAREST FIRST
+        ==========================================
+        */
+
+        {
+          $sort: {
+            distance: 1,
+          },
+        },
+      ]);
 
     return results;
+
   } catch (err) {
-    console.log("GeoQuery Error:", err);
+
+    console.log(
+      "GeoQuery Error:",
+      err
+    );
+
     return [];
   }
 }
 
-module.exports = { getNearbyStops };
+module.exports = {
+  getNearbyStops,
+};
