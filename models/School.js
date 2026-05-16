@@ -1,3 +1,7 @@
+// ======================================================
+// models/School.js
+// ======================================================
+
 const mongoose = require("mongoose");
 
 const schoolSchema = new mongoose.Schema(
@@ -7,29 +11,88 @@ const schoolSchema = new mongoose.Schema(
       required: true,
       unique: true,
       index: true,
+      trim: true,
+      uppercase: true,
     },
 
     name: {
       type: String,
       required: true,
+      trim: true,
     },
 
     address: {
       line1: String,
-      city: String,
-      state: String,
-      country: String,
-      pincode: String,
-    },
 
-    contact: {
-      phone: String,
-      email: String,
+      city: String,
+
+      state: String,
+
+      country: String,
+
+      pincode: String,
+      latitude: {
+    type: Number,
+    default: null,
+  },
+
+  longitude: {
+    type: Number,
+    default: null,
+  },
     },
 
     /*
-      Dashboard references only
-      NOT full data
+    ==================================================
+    CONTACT
+    ==================================================
+    */
+
+    contact: {
+      phone: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true,
+      },
+
+      email: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,
+        trim: true,
+      },
+    },
+
+    /*
+    ==================================================
+    OTP SYSTEM
+    ==================================================
+    */
+
+   
+
+    /*
+    ==================================================
+    AUTH
+    ==================================================
+    */
+
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+  tokenVersion: {
+      type: Number,
+      default: 0,
+    },
+
+    /*
+    ==================================================
+    DASHBOARD REFERENCES ONLY
+    ==================================================
     */
 
     Students: [
@@ -39,8 +102,11 @@ const schoolSchema = new mongoose.Schema(
     ],
 
     /*
-      Dashboard counters
+    ==================================================
+    DASHBOARD COUNTERS
+    ==================================================
     */
+
     stats: {
       totalStudents: {
         type: Number,
@@ -63,20 +129,31 @@ const schoolSchema = new mongoose.Schema(
   },
 );
 
-module.exports = mongoose.model("School", schoolSchema);
+module.exports = mongoose.model(
+  "School",
+  schoolSchema,
+);
 
 /*
-WHY THIS IS CORRECT:
+==================================================
 
-✅ School dashboard can quickly see:
-- buses
-- drivers
-- Students
+WHY THIS STRUCTURE IS GOOD
 
-✅ But actual full data stays
-in separate collections
+==================================================
 
-✅ Avoids huge document problem
+✅ No extra OTP schema needed
 
-✅ Easy dashboard management
+✅ OTP stored directly in school
+
+✅ Phone and email both unique
+
+✅ OTP expiry supported
+
+✅ Login + Register flow supported
+
+✅ Dashboard remains lightweight
+
+✅ Better for small-medium scale
+
+==================================================
 */

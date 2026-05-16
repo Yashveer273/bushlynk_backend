@@ -1,13 +1,18 @@
 const express = require("express");
 const { startRetryWorker } = require("./workers/cronRunner");
 const connectDB = require("./config/mongo");
-
+const cors = require("cors");
 const startConsumer = require("./kafka/consumer");
 require("./config/firebase");
 const { loadPickupPoints } = require("./services/loadpicups_in_redis");
 
 const app = express();
-
+app.use(
+  cors({
+    origin: "*",
+    methods: "*",
+  }),
+);
 app.use(express.json());
 
 /*
