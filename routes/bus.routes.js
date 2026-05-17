@@ -1,10 +1,32 @@
-const router = require("express").Router();
+const router =
+  require("express").Router();
+
+/*
+=====================================
+CONTROLLERS
+=====================================
+*/
 
 const {
   registerBus,
   editBus,
   removeBus,
+  getAllBuses
 } = require("../controllers/bus.controller");
+
+const {
+  getNextPickupPoint
+} = require("../controllers/busRoute.controller");
+
+/*
+=====================================
+MIDDLEWARE
+=====================================
+*/
+
+const {
+  auth
+} = require("../middlewares/school.auth");
 
 /*
 =====================================
@@ -13,33 +35,78 @@ BUS ROUTES
 */
 
 /*
-  Register new bus
+-------------------------------------
+REGISTER BUS
+-------------------------------------
+API:
+POST /api/v1/bus/register
+-------------------------------------
+TOKEN:
+Required
+-------------------------------------
 */
+
 router.post(
   "/register",
+  auth,
   registerBus
 );
 
 /*
-  Edit bus details
+-------------------------------------
+EDIT BUS
+-------------------------------------
+API:
+PUT /api/v1/bus/editBus?busId=BUS_ID
+-------------------------------------
+TOKEN:
+Required
+-------------------------------------
 */
+
 router.put(
   "/editBus",
+  auth,
   editBus
 );
 
 /*
-  Remove bus
+-------------------------------------
+REMOVE BUS
+-------------------------------------
+API:
+DELETE /api/v1/bus/removeBus?busId=BUS_ID
+-------------------------------------
+TOKEN:
+Required
+-------------------------------------
 */
+
 router.delete(
   "/removeBus",
+  auth,
   removeBus
 );
-const {
+router.get(
+  "/all",
+  auth,
+  getAllBuses
+
+);
+// ----------------------------------------------------------------------------------------
+/*
+-------------------------------------
+NEXT PICKUP POINT
+
+TOKEN:
+Required
+-------------------------------------
+*/
+
+router.get(
+  "/next-pickup-point",
+  auth,
   getNextPickupPoint
-} = require("../controllers/busRoute.controller");
-
-router.get("/next-pickup-point", getNextPickupPoint);
-
+);
 
 module.exports = router;

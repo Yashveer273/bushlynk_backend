@@ -2,7 +2,8 @@
 // routes/school.routes.js
 // ======================================================
 
-const router = require("express").Router();
+const router =
+  require("express").Router();
 
 const {
   startRegistration,
@@ -10,7 +11,18 @@ const {
   loginSchool,
   verifyLoginOtp,
   getProfile,
+    logoutSchool
 } = require("../controllers/school.controller");
+
+/*
+==================================================
+AUTH MIDDLEWARE
+==================================================
+*/
+
+const {
+  auth
+} = require("../middlewares/school.auth");
 
 /*
 ==================================================
@@ -18,30 +30,50 @@ REGISTRATION (STATELESS OTP FLOW)
 ==================================================
 */
 
-// STEP 1: Generate OTP + return to frontend
-router.post("/register/start", startRegistration);
+// STEP 1: Generate OTP
+router.post(
+  "/register/start",
+  startRegistration
+);
 
-// STEP 2: Complete registration (frontend already verified OTP)
-router.post("/register/complete", completeRegistration);
+// STEP 2: Complete registration
+router.post(
+  "/register/complete",
+  completeRegistration
+);
 
 /*
 ==================================================
-LOGIN FLOW (STATELESS OTP)
+LOGIN FLOW
 ==================================================
 */
 
 // SEND OTP
-router.post("/login", loginSchool);
+router.post(
+  "/login",
+  loginSchool
+);
 
-// VERIFY LOGIN (NO OTP CHECK IN BACKEND IN YOUR NEW DESIGN)
-router.post("/login/verify-otp", verifyLoginOtp);
-
+// VERIFY OTP
+router.post(
+  "/login/verify-otp",
+  verifyLoginOtp
+);
+router.delete(
+  "/logout",
+  auth,
+  logoutSchool
+);
 /*
 ==================================================
 PROTECTED
 ==================================================
 */
 
-router.get("/profile", getProfile);
+router.get(
+  "/profile",
+  auth,
+  getProfile
+);
 
 module.exports = router;

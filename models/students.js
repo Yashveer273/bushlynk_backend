@@ -158,7 +158,9 @@ const StudentSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model(
-  "Students",
-  StudentSchema
-);
+module.exports =
+  mongoose.models.Students ||
+  mongoose.model(
+    "Students",
+    StudentSchema
+  );

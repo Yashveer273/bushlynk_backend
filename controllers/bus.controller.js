@@ -21,14 +21,10 @@ DATA TO PASS:
 */
 
 exports.registerBus = async (req, res) => {
-
   try {
-
-    const {
-      schoolId,
-      busNumber,
-      busAsignNumber,
-    } = req.body;
+    const { busNumber, busAsignNumber } = req.body;
+    const { schoolId } = req.user;
+    console.log("SCHOOL ID FROM TOKEN:", schoolId, busNumber, busAsignNumber);
 
     /*
     =====================================
@@ -36,18 +32,11 @@ exports.registerBus = async (req, res) => {
     =====================================
     */
 
-    if (
-      !schoolId ||
-      !busNumber ||
-      !busAsignNumber
-    ) {
-
+    if (!schoolId || !busNumber || !busAsignNumber) {
       return res.status(400).json({
-
         success: false,
 
-        message:
-          "schoolId, busNumber and busAsignNumber are required",
+        message: "schoolId, busNumber and busAsignNumber are required",
       });
     }
 
@@ -57,23 +46,15 @@ exports.registerBus = async (req, res) => {
     =====================================
     */
 
-    const existingBus =
-      await Bus.findOne({
-
-        $or: [
-          { busNumber },
-          { busAsignNumber },
-        ],
-      });
+    const existingBus = await Bus.findOne({
+      $or: [{ busNumber }, { busAsignNumber }],
+    });
 
     if (existingBus) {
-
       return res.status(409).json({
-
         success: false,
 
-        message:
-          "Bus already registered",
+        message: "Bus already registered",
       });
     }
 
@@ -83,19 +64,15 @@ exports.registerBus = async (req, res) => {
     =====================================
     */
 
-    const school =
-      await School.findOne({
-        schoolId,
-      });
+    const school = await School.findOne({
+      schoolId,
+    });
 
     if (!school) {
-
       return res.status(404).json({
-
         success: false,
 
-        message:
-          "School not found",
+        message: "School not found",
       });
     }
 
@@ -105,17 +82,15 @@ exports.registerBus = async (req, res) => {
     =====================================
     */
 
-    const newBus =
-      await Bus.create({
+    const newBus = await Bus.create({
+      busNumber,
 
-        busNumber,
+      busAsignNumber,
 
-        busAsignNumber,
+      schoolId,
 
-        schoolId,
-
-        driverlogin: {},
-      });
+      driverlogin: {},
+    });
 
     /*
     =====================================
@@ -124,7 +99,6 @@ exports.registerBus = async (req, res) => {
     */
 
     await School.updateOne(
-
       {
         schoolId,
       },
@@ -139,34 +113,71 @@ exports.registerBus = async (req, res) => {
         $inc: {
           "stats.totalBuses": 1,
         },
-      }
+      },
     );
 
     return res.status(201).json({
-
       success: true,
 
-      message:
-        "Bus registered successfully",
+      message: "Bus registered successfully",
 
-      data:
-        newBus,
+      data: newBus,
     });
-
   } catch (err) {
-
     console.log(err);
 
     return res.status(500).json({
-
       success: false,
 
-      message:
-        "Server error",
+      message: "Server error",
     });
   }
 };
+/*
+============================================================
+GET ALL BUSES
+============================================================
+*/
 
+exports.getAllBuses = async (req, res) => {
+  try {
+    /*
+      ============================================
+      SCHOOL FROM TOKEN
+      ============================================
+      */
+
+    const schoolId = req.user.schoolId;
+
+    /*
+      ============================================
+      GET SCHOOL BUSES
+      ============================================
+      */
+
+    const buses = await Bus.find({
+      schoolId,
+    })
+
+      .sort({
+        createdAt: -1,
+      });
+
+    return res.status(200).json({
+      success: true,
+
+      count: buses.length,
+
+      data: buses,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+
+      message: "Server error",
+    });
+  }
+};
 
 /*
 ============================================================
@@ -184,16 +195,10 @@ DATA TO PASS:
 */
 
 exports.editBus = async (req, res) => {
-
   try {
+    const { busId } = req.query;
 
-    const { busId } =
-      req.query;
-
-    const {
-      busNumber,
-      busAsignNumber,
-    } = req.body;
+    const { busNumber, busAsignNumber } = req.body;
 
     /*
     =====================================
@@ -201,17 +206,11 @@ exports.editBus = async (req, res) => {
     =====================================
     */
 
-    if (
-      !busNumber &&
-      !busAsignNumber
-    ) {
-
+    if (!busNumber && !busAsignNumber) {
       return res.status(400).json({
-
         success: false,
 
-        message:
-          "busNumber or busAsignNumber required",
+        message: "busNumber or busAsignNumber required",
       });
     }
 
@@ -221,19 +220,13 @@ exports.editBus = async (req, res) => {
     =====================================
     */
 
-    const existingBus =
-      await Bus.findById(
-        busId
-      );
+    const existingBus = await Bus.findById(busId);
 
     if (!existingBus) {
-
       return res.status(404).json({
-
         success: false,
 
-        message:
-          "Bus not found",
+        message: "Bus not found",
       });
     }
 
@@ -243,34 +236,23 @@ exports.editBus = async (req, res) => {
     =====================================
     */
 
-    const duplicateBus =
-      await Bus.findOne({
+    const duplicateBus = await Bus.findOne({
+      _id: {
+        $ne: busId,
+      },
 
-        _id: {
-          $ne: busId,
-        },
+      $or: [
+        busNumber ? { busNumber } : null,
 
-        $or: [
-
-          busNumber
-            ? { busNumber }
-            : null,
-
-          busAsignNumber
-            ? { busAsignNumber }
-            : null,
-
-        ].filter(Boolean),
-      });
+        busAsignNumber ? { busAsignNumber } : null,
+      ].filter(Boolean),
+    });
 
     if (duplicateBus) {
-
       return res.status(409).json({
-
         success: false,
 
-        message:
-          "Bus number already exists",
+        message: "Bus number already exists",
       });
     }
 
@@ -280,8 +262,7 @@ exports.editBus = async (req, res) => {
     =====================================
     */
 
-    const oldBusNumber =
-      existingBus.busNumber;
+    const oldBusNumber = existingBus.busNumber;
 
     /*
     =====================================
@@ -290,15 +271,11 @@ exports.editBus = async (req, res) => {
     */
 
     if (busNumber) {
-
-      existingBus.busNumber =
-        busNumber;
+      existingBus.busNumber = busNumber;
     }
 
     if (busAsignNumber) {
-
-      existingBus.busAsignNumber =
-        busAsignNumber;
+      existingBus.busAsignNumber = busAsignNumber;
     }
 
     await existingBus.save();
@@ -309,27 +286,19 @@ exports.editBus = async (req, res) => {
     =====================================
     */
 
-    if (
-      busNumber &&
-      oldBusNumber !== busNumber
-    ) {
-
+    if (busNumber && oldBusNumber !== busNumber) {
       await School.updateOne(
-
         {
-          schoolId:
-            existingBus.schoolId,
+          schoolId: existingBus.schoolId,
 
-          "buses.busNumber":
-            oldBusNumber,
+          "buses.busNumber": oldBusNumber,
         },
 
         {
           $set: {
-            "buses.$.busNumber":
-              busNumber,
+            "buses.$.busNumber": busNumber,
           },
-        }
+        },
       );
 
       /*
@@ -339,55 +308,43 @@ exports.editBus = async (req, res) => {
       */
 
       await User.updateMany(
-
         {
-          "children.busNumber":
-            oldBusNumber,
+          "children.busNumber": oldBusNumber,
         },
 
         {
           $set: {
-            "children.$[elem].busNumber":
-              busNumber,
+            "children.$[elem].busNumber": busNumber,
           },
         },
 
         {
           arrayFilters: [
             {
-              "elem.busNumber":
-                oldBusNumber,
+              "elem.busNumber": oldBusNumber,
             },
           ],
-        }
+        },
       );
     }
 
     return res.status(200).json({
-
       success: true,
 
-      message:
-        "Bus updated successfully",
+      message: "Bus updated successfully",
 
-      data:
-        existingBus,
+      data: existingBus,
     });
-
   } catch (err) {
-
     console.log(err);
 
     return res.status(500).json({
-
       success: false,
 
-      message:
-        "Server error",
+      message: "Server error",
     });
   }
 };
-
 
 /*
 ============================================================
@@ -399,11 +356,8 @@ DELETE /api/v1/bus/remove?busId=BUS_OBJECT_ID
 */
 
 exports.removeBus = async (req, res) => {
-
   try {
-
-    const { busId } =
-      req.query;
+    const { busId } = req.query;
 
     /*
     =====================================
@@ -411,19 +365,13 @@ exports.removeBus = async (req, res) => {
     =====================================
     */
 
-    const bus =
-      await Bus.findById(
-        busId
-      );
+    const bus = await Bus.findById(busId);
 
     if (!bus) {
-
       return res.status(404).json({
-
         success: false,
 
-        message:
-          "Bus not found",
+        message: "Bus not found",
       });
     }
 
@@ -433,21 +381,15 @@ exports.removeBus = async (req, res) => {
     =====================================
     */
 
-    const assignedStudents =
-      await User.findOne({
-
-        "children.busNumber":
-          bus.busNumber,
-      });
+    const assignedStudents = await User.findOne({
+      "children.busNumber": bus.busNumber,
+    });
 
     if (assignedStudents) {
-
       return res.status(400).json({
-
         success: false,
 
-        message:
-          "Bus assigned to students",
+        message: "Bus assigned to students",
       });
     }
 
@@ -458,24 +400,21 @@ exports.removeBus = async (req, res) => {
     */
 
     await School.updateOne(
-
       {
-        schoolId:
-          bus.schoolId,
+        schoolId: bus.schoolId,
       },
 
       {
         $pull: {
           buses: {
-            busNumber:
-              bus.busNumber,
+            busNumber: bus.busNumber,
           },
         },
 
         $inc: {
           "stats.totalBuses": -1,
         },
-      }
+      },
     );
 
     /*
@@ -484,28 +423,20 @@ exports.removeBus = async (req, res) => {
     =====================================
     */
 
-    await Bus.findByIdAndDelete(
-      busId
-    );
+    await Bus.findByIdAndDelete(busId);
 
     return res.status(200).json({
-
       success: true,
 
-      message:
-        "Bus removed successfully",
+      message: "Bus removed successfully",
     });
-
   } catch (err) {
-
     console.log(err);
 
     return res.status(500).json({
-
       success: false,
 
-      message:
-        "Server error",
+      message: "Server error",
     });
   }
 };

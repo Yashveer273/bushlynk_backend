@@ -25,7 +25,7 @@ app.use("/api", require("./routes/location"));
 app.use("/api/school", require("./routes/school.routes"));
 app.use("/api/driver", require("./routes/driver.routes"));
 app.use("/api/student", require("./routes/user.routes"));
-app.use("/api/bus", require("./routes/bus.routes"));
+
 app.use("/api/subscription", require("./routes/subscription.routes"));
 app.use("/api/bus", require("./routes/bus.routes"));
 app.use("/api/pickupPoint", require("./routes/pickupPoint.routes"));
@@ -55,7 +55,7 @@ async function startServer() {
     START KAFKA CONSUMER
     =====================================
     */
-    await startConsumer();
+    // await startConsumer();
 startRetryWorker();
     app.listen(3000, () => {
       console.log("✅ Server started on 3000");

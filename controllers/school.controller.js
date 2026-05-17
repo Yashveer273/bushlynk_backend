@@ -6,6 +6,10 @@
 const School = require("../models/School");
 const jwt = require("jsonwebtoken");
 
+const Bus = require("../models/Bus");
+const Driver = require("../models/Driver");
+const PickupPoint = require("../models/PickupPoint");
+const Students = require("../models/Students");
 /*
 ==================================================
 OTP GENERATOR
@@ -287,13 +291,164 @@ GET PROFILE
 ==================================================
 */
 
+
 exports.getProfile = async (req, res) => {
   try {
-    const school = await School.findById(req.user.id);
+    /*
+    =====================================
+    GET SCHOOL
+    =====================================
+    */
+
+    const school =
+      await School.findById(
+        req.user.id
+      );
+
+    if (!school) {
+      return res.status(404).json({
+        success: false,
+        message: "School not found",
+      });
+    }
+
+    /*
+    =====================================
+    SCHOOL ID
+    =====================================
+    */
+
+    const schoolId =
+      school.schoolId;
+
+    /*
+    =====================================
+    FETCH DASHBOARD DATA
+    =====================================
+    */
+
+    const [
+      totalBuses,
+      activeBuses,
+      totalDrivers,
+      totalStudentsDocs,
+      pickupPointDocs,
+    ] = await Promise.all([
+      /*
+      TOTAL BUSES
+      */
+      Bus.countDocuments({
+        schoolId,
+      }),
+
+      /*
+      ACTIVE BUSES
+      */
+      Bus.countDocuments({
+        schoolId,
+        "status.active": true,
+      }),
+
+      /*
+      TOTAL DRIVERS
+      */
+      Driver.countDocuments({
+        schoolId,
+      }),
+
+      /*
+      STUDENTS
+      */
+      Students.find({
+        schoolId,
+      }),
+
+      /*
+      PICKUP POINTS
+      */
+      PickupPoint.find({
+        schoolId,
+      }),
+    ]);
+
+    /*
+    =====================================
+    TOTAL STUDENTS COUNT
+    =====================================
+    */
+
+    let totalStudents = 0;
+
+    totalStudentsDocs.forEach(
+      (parentDoc) => {
+        totalStudents +=
+          parentDoc.children.length;
+      }
+    );
+
+    /*
+    =====================================
+    TOTAL PICKUP POINTS
+    =====================================
+    */
+
+    let totalPickupPoints = 0;
+
+    pickupPointDocs.forEach(
+      (doc) => {
+        totalPickupPoints +=
+          doc.pickupPoints.length;
+      }
+    );
+
+    /*
+    =====================================
+    RESPONSE
+    =====================================
+    */
 
     return res.status(200).json({
       success: true,
-      school,
+
+      dashboard: {
+        school: {
+          id: school._id,
+
+          schoolId:
+            school.schoolId,
+
+          name: school.name,
+
+          verified:
+            school.isVerified,
+
+          createdAt:
+            school.createdAt,
+
+          contact: {
+            phone:
+              school.contact?.phone,
+
+            email:
+              school.contact?.email,
+          },
+
+          address:
+            school.address,
+        },
+
+        analytics: {
+          totalBuses,
+
+          activeBuses,
+
+          totalDrivers,
+
+          totalStudents,
+
+          totalPickupPoints,
+        },
+      },
     });
   } catch (err) {
     return res.status(500).json({
@@ -303,3 +458,60 @@ exports.getProfile = async (req, res) => {
   }
 };
 
+
+
+/*
+==================================================
+LOGOUT SCHOOL
+==================================================
+*/
+
+exports.logoutSchool =
+  async (req, res) => {
+
+    try {
+
+      const school =
+        await School.findById(
+          req.user.id
+        );
+
+      if (!school) {
+
+        return res.status(404).json({
+
+          success: false,
+
+          message:
+            "School not found",
+        });
+      }
+
+      /*
+      ==================================
+      INVALIDATE OLD TOKENS
+      ==================================
+      */
+
+      school.tokenVersion += 1;
+
+      await school.save();
+
+      return res.status(200).json({
+
+        success: true,
+
+        message:
+          "Logout successful",
+      });
+
+    } catch (err) {
+
+      return res.status(500).json({
+
+        success: false,
+
+        error: err.message,
+      });
+    }
+  };
