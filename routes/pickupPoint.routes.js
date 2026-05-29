@@ -8,10 +8,12 @@ const {
   removeStudent,
   removePickupPoint,
   addPickupPoint,
-} = require(
-  "../controllers/pickupPoint.Controller"
-);
-
+  editPickupPoint,
+  changeBusId,
+  removeCompleteBusPickupPoints,
+  getPaginatedBusesWithPickupPoints,getPickupPointsByBus
+} = require("../controllers/pickupPoint.Controller");
+const { auth } = require("../middlewares/school.auth");
 /*
 ==================================================
 1. CREATE PICKUP POINT
@@ -45,11 +47,19 @@ Thunder Client Body:
 }
 */
 
-router.post(
-  "/create",
-  createPickupPoint
+router.post("/create", auth, createPickupPoint);
+router.put("/edit", auth, editPickupPoint);
+router.get(
+  "/get-buses-paginated",
+  auth,
+  getPaginatedBusesWithPickupPoints,
 );
-
+router.get(
+  "/get-pickup-points/:busNumber",
+  auth,
+  getPickupPointsByBus,
+);
+router.put("/change-bus-id", auth, changeBusId);
 /*
 ==================================================
 2. ADD STUDENT
@@ -71,10 +81,7 @@ Thunder Client Body:
 }
 */
 
-router.post(
-  "/add-student",
-  addStudent
-);
+router.post("/add-student", auth, addStudent);
 
 /*
 ==================================================
@@ -95,14 +102,8 @@ Thunder Client Body:
 }
 */
 
-router.post(
-  "/remove-student",
-  removeStudent
-);
-router.post(
-  "/remove-pickup-point",
-  removePickupPoint
-);
+router.post("/remove-student", auth, removeStudent);
+
 /*
 ==================================================
 4. REMOVE PICKUP POINT
@@ -120,11 +121,12 @@ Thunder Client Body:
 }
 */
 
+router.delete("/remove-pickup-point", auth, removePickupPoint);
 router.delete(
-  "/remove-pickup-point",
-  removePickupPoint
+  "/remove-complete-bus-pickup-points",
+  auth,
+  removeCompleteBusPickupPoints,
 );
-
 /*
 ==================================================
 5. ADD ADDITIONAL PICKUP POINT
@@ -154,9 +156,6 @@ Thunder Client Body:
 }
 */
 
-router.post(
-  "/add-pickup-point",
-  addPickupPoint
-);
+router.post("/add-pickup-point", auth, addPickupPoint);
 
 module.exports = router;

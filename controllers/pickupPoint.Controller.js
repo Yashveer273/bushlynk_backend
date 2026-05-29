@@ -13,11 +13,11 @@ exports.createPickupPoint = async (req, res) => {
   try {
 
     const {
-      schoolId,
+      
       busNumber,
       pickupPoints,
     } = req.body;
-
+   const { schoolId } = req.user;
     /*
     =====================================
     VALIDATION
@@ -257,12 +257,12 @@ exports.addStudent = async (req, res) => {
   try {
 
     const {
-      schoolId,
+  
       busNumber,
       pickupPointId,
       student,
     } = req.body;
-
+   const { schoolId } = req.user;
     /*
     REQUIRED STRUCTURE
     student: {
@@ -444,13 +444,13 @@ exports.removeStudent = async (req, res) => {
   try {
 
     const {
-      schoolId,
+  
       busNumber,
       pickupPointId,
       parentId,
       childId,
     } = req.body;
-
+   const { schoolId } = req.user;
     /*
     =====================================
     FIND DOCUMENT
@@ -576,11 +576,11 @@ exports.removePickupPoint = async (req, res) => {
   try {
 
     const {
-      schoolId,
+     
       pickupPointId,
       busNumber,
     } = req.body;
-
+   const { schoolId } = req.user;
     if (
       !schoolId ||
       !pickupPointId ||
@@ -721,11 +721,11 @@ exports.addPickupPoint = async (req, res) => {
   try {
 
     const {
-      schoolId,
+     
       busNumber,
       pickupPoints,
     } = req.body;
-
+   const { schoolId } = req.user;
     if (
       !Array.isArray(
         pickupPoints
@@ -899,3 +899,664 @@ exports.addPickupPoint = async (req, res) => {
     });
   }
 };
+exports.editPickupPoint = async (req, res) => {
+  try {
+    const {
+      busNumber,
+      pickupPointId,
+      name,
+      radius,
+      location,
+    } = req.body;
+
+    const { schoolId } = req.user;
+
+    /*
+    =====================================
+    FIND DOCUMENT
+    =====================================
+    */
+
+    const pickupDoc =
+      await PickupPoint.findOne({
+        schoolId,
+        busNumber,
+      });
+
+    if (!pickupDoc) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Pickup document not found",
+      });
+    }
+
+    /*
+    =====================================
+    FIND PICKUP POINT
+    =====================================
+    */
+
+    const pickupPoint =
+      pickupDoc.pickupPoints.find(
+        (p) =>
+          p.pickupPointId ===
+          pickupPointId
+      );
+
+    if (!pickupPoint) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Pickup point not found",
+      });
+    }
+
+    /*
+    =====================================
+    UPDATE VALUES
+    =====================================
+    */
+
+    if (name)
+      pickupPoint.name = name;
+
+    if (radius)
+      pickupPoint.radius =
+        radius;
+
+    if (location)
+      pickupPoint.location =
+        location;
+
+    await pickupDoc.save();
+
+    /*
+    =====================================
+    REDIS UPDATE
+    =====================================
+    */
+
+    const redisKey =
+      `pickup_points:${schoolId}:${busNumber}`;
+
+    await redisClient.set(
+      redisKey,
+      JSON.stringify(
+        pickupDoc.pickupPoints
+      )
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Pickup point updated successfully",
+      data: pickupDoc,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+exports.changeBusId = async (
+  req,
+  res
+) => {
+  try {
+    const {
+      oldBusNumber,
+      newBusNumber,
+    } = req.body;
+
+    const { schoolId } =
+      req.user;
+
+    /*
+    =====================================
+    VALIDATION
+    =====================================
+    */
+
+    if (
+      !oldBusNumber ||
+      !newBusNumber
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Old and new bus numbers are required",
+      });
+    }
+
+    /*
+    =====================================
+    FIND DOCUMENT
+    =====================================
+    */
+
+    const pickupDoc =
+      await PickupPoint.findOne({
+        schoolId,
+        busNumber:
+          oldBusNumber,
+      });
+
+    if (!pickupDoc) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Pickup document not found",
+      });
+    }
+
+    /*
+    =====================================
+    CHECK NEW BUS EXISTS
+    =====================================
+    */
+
+    const alreadyExists =
+      await PickupPoint.findOne({
+        schoolId,
+        busNumber:
+          newBusNumber,
+      });
+
+    if (alreadyExists) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "New bus number already exists",
+      });
+    }
+
+    /*
+    =====================================
+    UPDATE BUS NUMBER
+    =====================================
+    */
+
+    pickupDoc.busNumber =
+      newBusNumber;
+
+    await pickupDoc.save();
+
+    /*
+    =====================================
+    REDIS UPDATE
+    =====================================
+    */
+
+    const oldRedisKey =
+      `pickup_points:${schoolId}:${oldBusNumber}`;
+
+    const newRedisKey =
+      `pickup_points:${schoolId}:${newBusNumber}`;
+
+    await redisClient.del(
+      oldRedisKey
+    );
+
+    await redisClient.set(
+      newRedisKey,
+
+      JSON.stringify(
+        pickupDoc.pickupPoints
+      )
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Bus ID updated successfully",
+      data: pickupDoc,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+/*
+========================================
+REMOVE COMPLETE BUS PICKUP POINTS
+========================================
+*/
+
+exports.removeCompleteBusPickupPoints =
+  async (req, res) => {
+
+    try {
+
+      const {
+        busNumber,
+      } = req.body;
+
+      const {
+        schoolId,
+      } = req.user;
+
+      /*
+      ========================================
+      VALIDATION
+      ========================================
+      */
+
+      if (!busNumber) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Bus number is required",
+        });
+      }
+
+      /*
+      ========================================
+      FIND DOCUMENT
+      ========================================
+      */
+
+      const pickupDoc =
+        await PickupPoint.findOne({
+
+          schoolId,
+          busNumber,
+        });
+
+      if (!pickupDoc) {
+
+        return res.status(404).json({
+
+          success: false,
+
+          message:
+            "Pickup document not found",
+        });
+      }
+
+      /*
+      ========================================
+      DELETE DOCUMENT
+      ========================================
+      */
+
+      await PickupPoint.findOneAndDelete({
+
+        schoolId,
+        busNumber,
+      });
+
+      /*
+      ========================================
+      REMOVE REDIS CACHE
+      ========================================
+      */
+
+      const redisKey =
+        `pickup_points:${schoolId}:${busNumber}`;
+
+      await redisClient.del(
+        redisKey
+      );
+
+      /*
+      ========================================
+      RESPONSE
+      ========================================
+      */
+
+      return res.status(200).json({
+
+        success: true,
+
+        message:
+          "Complete bus pickup points removed successfully",
+      });
+
+    } catch (error) {
+
+      console.log(error);
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Server error",
+      });
+    }
+};
+
+/*
+========================================
+GET ALL BUSES WITH PICKUP POINTS
+BUS PAGINATION + DEFAULT 5 PICKUP POINTS
+========================================
+*/
+
+exports.getPaginatedBusesWithPickupPoints =
+  async (req, res) => {
+
+    try {
+
+      /*
+      ========================================
+      QUERY PARAMS
+      ========================================
+      */
+
+      const page =
+        Number(req.query.page) || 1;
+
+      const limit =
+        Number(req.query.limit) || 5;
+
+      const pickupPointLimit =
+        Number(
+          req.query.pickupPointLimit
+        ) || 5;
+
+      const search =
+        req.query.search || "";
+
+      const skip =
+        (page - 1) * limit;
+
+      const { schoolId } =
+        req.user;
+
+      /*
+      ========================================
+      FILTER
+      ========================================
+      */
+
+      const filter = {
+        schoolId,
+      };
+
+      if (search) {
+
+        filter.busNumber = {
+
+          $regex: search,
+          $options: "i",
+        };
+      }
+
+      /*
+      ========================================
+      TOTAL BUSES
+      ========================================
+      */
+
+      const totalBuses =
+        await PickupPoint.countDocuments(
+          filter
+        );
+
+      /*
+      ========================================
+      GET BUSES
+      ========================================
+      */
+
+      const buses =
+        await PickupPoint.find(
+          filter
+        )
+
+          .sort({
+            createdAt: -1,
+          })
+
+          .skip(skip)
+
+          .limit(limit)
+
+          .lean();
+
+      /*
+      ========================================
+      FORMAT RESPONSE
+      ========================================
+      */
+
+      const formattedData =
+        buses.map((bus) => ({
+
+          _id: bus._id,
+
+          busNumber:
+            bus.busNumber,
+
+          totalPickupPoints:
+            bus.pickupPoints
+              ?.length || 0,
+
+          pickupPoints:
+            bus.pickupPoints.slice(
+              0,
+              pickupPointLimit
+            ),
+
+          pickupPointPagination: {
+
+            currentPage: 1,
+
+            limit:
+              pickupPointLimit,
+
+            totalPickupPoints:
+              bus.pickupPoints
+                ?.length || 0,
+
+            totalPages:
+              Math.ceil(
+                (bus.pickupPoints
+                  ?.length || 0) /
+                  pickupPointLimit
+              ),
+          },
+
+          createdAt:
+            bus.createdAt,
+        }));
+
+      /*
+      ========================================
+      RESPONSE
+      ========================================
+      */
+
+      return res.status(200).json({
+
+        success: true,
+
+        message:
+          "Buses fetched successfully",
+
+        data: formattedData,
+
+        pagination: {
+
+          currentPage: page,
+
+          limit,
+
+          totalBuses,
+
+          totalPages:
+            Math.ceil(
+              totalBuses / limit
+            ),
+        },
+      });
+
+    } catch (error) {
+
+      console.log(error);
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Server Error",
+      });
+    }
+  };
+
+ 
+/*
+========================================
+GET PICKUP POINTS UNDER BUS
+PICKUP POINT PAGINATION
+========================================
+*/
+
+exports.getPickupPointsByBus =
+  async (req, res) => {
+
+    try {
+
+      /*
+      ========================================
+      QUERY PARAMS
+      ========================================
+      */
+
+      const page =
+        Number(req.query.page) || 1;
+
+      const limit =
+        Number(req.query.limit) || 5;
+
+      const skip =
+        (page - 1) * limit;
+
+      const { busNumber } =
+        req.params;
+
+      const { schoolId } =
+        req.user;
+
+      /*
+      ========================================
+      FIND BUS DOCUMENT
+      ========================================
+      */
+
+      const pickupDoc =
+        await PickupPoint.findOne({
+
+          schoolId,
+          busNumber,
+        }).lean();
+
+      if (!pickupDoc) {
+
+        return res.status(404).json({
+
+          success: false,
+
+          message:
+            "Bus pickup points not found",
+        });
+      }
+
+      /*
+      ========================================
+      TOTAL PICKUP POINTS
+      ========================================
+      */
+
+      const totalPickupPoints =
+        pickupDoc.pickupPoints
+          ?.length || 0;
+
+      /*
+      ========================================
+      REVERSE ORDER
+      LATEST PICKUP POINT FIRST
+      ========================================
+      */
+
+      const reversedPickupPoints =
+        [...pickupDoc.pickupPoints]
+          .reverse();
+
+      /*
+      ========================================
+      PAGINATED PICKUP POINTS
+      ========================================
+      */
+
+      const paginatedPickupPoints =
+        reversedPickupPoints.slice(
+
+          skip,
+          skip + limit
+        );
+
+      /*
+      ========================================
+      RESPONSE
+      ========================================
+      */
+
+      return res.status(200).json({
+
+        success: true,
+
+        message:
+          "Pickup points fetched successfully",
+
+        data: {
+
+          busNumber:
+            pickupDoc.busNumber,
+
+          pickupPoints:
+            paginatedPickupPoints,
+        },
+
+        pagination: {
+
+          currentPage: page,
+
+          limit,
+
+          totalPickupPoints,
+
+          totalPages:
+            Math.ceil(
+              totalPickupPoints /
+                limit
+            ),
+        },
+      });
+
+    } catch (error) {
+
+      console.log(error);
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Server Error",
+      });
+    }
+  };
