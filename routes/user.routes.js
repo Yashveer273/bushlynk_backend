@@ -1,5 +1,5 @@
 const router = require("express").Router();
-
+const { auth } = require("../middlewares/school.auth");
 
 const {
 
@@ -15,12 +15,13 @@ const {
   resendOTP,
 
  
-
+deleteChild,
   updateStudent,
-  deleteStudent,
-
-
-
+  deleteParent,
+getParentsPagination,
+getChildById,
+getParentById,
+addChild,
   saveFcmToken,
 
 } = require("../controllers/user.controller");
@@ -50,7 +51,7 @@ FLOW:
 */
 
 router.post(
-  "/send-register-otp",
+  "/send-register-otp",auth,
   sendRegisterOTP
 );
 
@@ -77,7 +78,7 @@ FLOW:
 */
 
 router.post(
-  "/verify-register-otp",
+  "/verify-register-otp",auth,
   verifyRegisterOTP
 );
 
@@ -119,7 +120,7 @@ FLOW:
 */
 
 router.post(
-  "/create",
+  "/create",auth,
   createStudent
 );
 
@@ -146,6 +147,7 @@ FLOW:
 
 router.post(
   "/send-otp",
+    auth,
   sendOTP
 );
 
@@ -171,7 +173,7 @@ FLOW:
 */
 
 router.post(
-  "/verify-otp",
+  "/verify-otp",auth,
   verifyOTP
 );
 
@@ -197,7 +199,7 @@ FLOW:
 */
 
 router.post(
-  "/resend-otp",
+  "/resend-otp",auth,
   resendOTP
 );
 
@@ -241,10 +243,14 @@ FLOW:
 */
 
 router.put(
-  "/student/update/:parentId",
+  "/student/update/:parentId",auth,
   updateStudent
 );
-
+router.post(
+  "/addChild/:parentId/child",
+  auth,
+  addChild
+);
 /*
 ================================================================================
 8. DELETE STUDENT
@@ -262,10 +268,14 @@ FLOW:
 */
 
 router.delete(
-  "/student/delete/:parentId",
-  deleteStudent
+  "/student/delete/:parentId/",auth,
+  deleteParent
 );
-
+router.delete(
+  "/student/delete/:parentId/child/:childId",
+  auth,
+  deleteChild
+);
 /*
 ================================================================================
 9. SAVE FCM TOKEN
@@ -287,8 +297,41 @@ FLOW:
 */
 
 router.post(
-  "/save-fcm-token",
+  "/save-fcm-token",auth,
   saveFcmToken
+);
+
+/*
+================================================================================
+10. GET PARENT BY ID
+================================================================================
+*/
+
+router.get(
+  "/parent/:parentId",auth,
+  getParentById
+);
+
+/*
+================================================================================
+11. GET PARENTS PAGINATION
+================================================================================
+*/
+
+router.get(
+  "/parents",auth,
+  getParentsPagination
+);
+
+/*
+================================================================================
+12. GET SINGLE CHILD
+================================================================================
+*/
+
+router.get(
+  "/parent/:parentId/child/:childId",auth,
+  getChildById
 );
 
 module.exports = router;

@@ -29,6 +29,13 @@ app.use("/api/student", require("./routes/user.routes"));
 app.use("/api/subscription", require("./routes/subscription.routes"));
 app.use("/api/bus", require("./routes/bus.routes"));
 app.use("/api/pickupPoint", require("./routes/pickupPoint.routes"));
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "🚀 Test API Server is running",
+    timestamp: new Date(),
+  });
+});
 /*
 =====================================
 START SERVER
@@ -56,9 +63,9 @@ async function startServer() {
     =====================================
     */
     // await startConsumer();
-startRetryWorker();
-    app.listen(3000, () => {
-      console.log("✅ Server started on 3000");
+    startRetryWorker();
+    app.listen(3000, "127.0.0.1", () => {
+      console.log("✅ Server running on http://127.0.0.1:3000");
     });
   } catch (err) {
     console.log("❌ Server Error:", err);

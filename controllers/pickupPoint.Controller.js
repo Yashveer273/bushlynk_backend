@@ -1417,7 +1417,48 @@ exports.getPaginatedBusesWithPickupPoints =
     }
   };
 
- 
+exports.getPickupPointById = async (
+  req,
+  res
+) => {
+  try {
+    const { id } = req.params;
+    const { schoolId } = req.user;
+
+    const pickupDocument =
+      await PickupPoint.findOne({
+        schoolId,
+        "pickupPoints.pickupPointId": id,
+      }).lean();
+
+    if (!pickupDocument) {
+      return res.status(404).json({
+        success: false,
+        message: "Pickup point not found",
+      });
+    }
+
+    const pickupPoint =
+      pickupDocument.pickupPoints.find(
+        (point) =>
+          point.pickupPointId === id
+      );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Pickup point fetched successfully",
+      data: pickupPoint,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+};
 /*
 ========================================
 GET PICKUP POINTS UNDER BUS

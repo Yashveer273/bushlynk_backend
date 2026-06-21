@@ -11,7 +11,7 @@ const {
   registerBus,
   editBus,
   removeBus,
-  getAllBuses
+  getAllBuses,assignDefaultDriverToBus
 } = require("../controllers/bus.controller");
 
 const {
@@ -51,7 +51,11 @@ router.post(
   auth,
   registerBus
 );
-
+router.post(
+  "/assign-default-driver",
+  auth,
+  assignDefaultDriverToBus
+);
 /*
 -------------------------------------
 EDIT BUS

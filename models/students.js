@@ -62,10 +62,7 @@ const StudentSchema = new mongoose.Schema(
         CHILD INFORMATION
         */
 
-        childId: {
-          type: String,
-          required: true,
-        },
+       
 
         studentId: {
           type: String,

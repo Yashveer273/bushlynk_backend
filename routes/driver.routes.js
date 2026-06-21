@@ -11,6 +11,10 @@ const {
   getDriverByBus,
   startDriverJob,
   endDriverJob,
+  driverLogin,
+  getDriverLoginHistory,
+  getDefaultAssignedBus
+  
 } = require("../controllers/driver.controller");
 
 /*
@@ -28,7 +32,17 @@ router.post("/remove", auth, removeDriver);
 */
 router.get("/getDriversBySchool", auth, getDriversBySchool);
 router.get("/getDriverByBus", auth, getDriverByBus);
+router.post("/login", driverLogin);
+
+
+router.get(
+  "/login-history",
+  
+  getDriverLoginHistory
+);
+
 router.post("/startDriverJob",  startDriverJob);
 router.post("/endDriverJob",  endDriverJob);
+router.post("/getDefaultAssignedBus",  getDefaultAssignedBus);
 
 module.exports = router;

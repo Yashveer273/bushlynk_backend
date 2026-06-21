@@ -1,5 +1,5 @@
 const generateId = require("../utils/generateId");
-
+const mongoose = require("mongoose");
 const User = require("../models/students");
 const School = require("../models/School");
 
@@ -14,10 +14,10 @@ exports.sendRegisterOTP = async (req, res) => {
   try {
 
     const {
-      schoolId,
+      
       parentPhone,
     } = req.body;
-
+   const { schoolId } = req.user;
     /*
     =====================================
     VALIDATION
@@ -168,11 +168,11 @@ exports.verifyRegisterOTP = async (req, res) => {
   try {
 
     const {
-      schoolId,
+      
       parentPhone,
       otp,
     } = req.body;
-
+   const { schoolId } = req.user;
     if (
       !schoolId ||
       !parentPhone ||
@@ -275,41 +275,42 @@ exports.verifyRegisterOTP = async (req, res) => {
 */
 
 exports.createStudent = async (req, res) => {
-
   try {
-
-    const {
-      schoolId,
-      parent,
-      child,
-      busNumber,
-      pickupPointId,
-    } = req.body;
+    const { parent, child, busNumber, pickupPointId } = req.body;
+    const { schoolId } = req.user;
 
     /*
     =====================================
     VALIDATION
     =====================================
     */
+    console.log("School ID:", schoolId);
+    const missingFields = [];
 
-    if (
-      !schoolId ||
-      !parent?.name ||
-      !parent?.phone ||
-      !child?.studentId ||
-      !child?.name ||
-      !child?.class ||
-      !child?.section ||
-      !child?.rollNumber ||
-      !busNumber
-    ) {
+    if (!schoolId) missingFields.push("schoolId");
+    if (!parent?.name) missingFields.push("parent.name");
+    if (!parent?.phone) missingFields.push("parent.phone");
+    if (!busNumber) missingFields.push("busNumber");
 
+    // Ensure child exists and is an array with at least one element
+    if (!child || !Array.isArray(child) || child.length === 0) {
+      missingFields.push("child array (must contain at least one student)");
+    } else {
+      // Validate every child entity inside the incoming array
+      child.forEach((c, index) => {
+        if (!c.studentId) missingFields.push(`child[${index}].studentId`);
+        if (!c.name) missingFields.push(`child[${index}].name`);
+        if (!c.class) missingFields.push(`child[${index}].class`);
+        if (!c.section) missingFields.push(`child[${index}].section`);
+        if (!c.rollNumber) missingFields.push(`child[${index}].rollNumber`);
+      });
+    }
+
+    if (missingFields.length > 0) {
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "Required fields missing",
+        message: "Required fields missing",
+        missingFields,
       });
     }
 
@@ -318,159 +319,201 @@ exports.createStudent = async (req, res) => {
     FIND EXISTING PARENT
     =====================================
     */
-
-    let existingParent =
-      await User.findOne({
-
-        schoolId,
-
-        "parent.phone":
-          parent.phone,
-      });
+    let existingParent = await User.findOne({
+      schoolId,
+      "parent.phone": parent.phone,
+    });
 
     /*
     =====================================
-    CHILD DATA
+    MAP MULTIPLE CHILDREN DATA
     =====================================
     */
-
-    const childData = {
-
-      childId:
-        generateId("CHI"),
-
-      studentId:
-        child.studentId,
-
-      name:
-        child.name,
-
-      class:
-        child.class,
-
-      section:
-        child.section,
-
-      rollNumber:
-        child.rollNumber,
-
+    const childrenDataArray = child.map((c) => ({
+      childId: generateId("CHI"),
+      studentId: c.studentId,
+      name: c.name,
+      class: c.class,
+      section: c.section,
+      rollNumber: c.rollNumber,
       busNumber,
-
-      pickupPointId:
-        pickupPointId || null,
-
+      pickupPointId: pickupPointId || null,
       status: {
         active: true,
       },
-    };
+    }));
 
     /*
     =====================================
-    EXISTING PARENT
-    ADD CHILD
+    EXISTING PARENT MANAGEMENT WORKFLOW
     =====================================
     */
-
     if (existingParent) {
-
-      /*
-      Prevent duplicate child
-      */
-
-      const alreadyChild =
-        existingParent.children.some(
-          (c) =>
-            c.studentId ===
-            child.studentId
+      const duplicateStudentIds = [];
+      
+      // Look for overlaps within existing storage profiles
+      childrenDataArray.forEach((newChild) => {
+        const alreadyChild = existingParent.children.some(
+          (c) => c.studentId === newChild.studentId
         );
+        if (alreadyChild) {
+          duplicateStudentIds.push(newChild.studentId);
+        }
+      });
 
-      if (alreadyChild) {
-
+      if (duplicateStudentIds.length > 0) {
         return res.status(409).json({
-
           success: false,
-
-          message:
-            "Child already exists",
+          message: "One or more student records already exist under this parent profile setup.",
+          duplicateStudentIds,
         });
       }
 
-      existingParent.parent.name =
-        parent.name;
-
-      existingParent.children.push(
-        childData
-      );
+      // Update name metrics if changed, and push all children entries safely
+      existingParent.parent.name = parent.name;
+      existingParent.children.push(...childrenDataArray);
 
       await existingParent.save();
 
       return res.status(200).json({
-
         success: true,
-
-        message:
-          "New child added successfully",
-
-        data:
-          existingParent,
+        message: "Supplemental child profiles attached to parent account registry records successfully.",
+        data: existingParent,
       });
     }
 
     /*
     =====================================
-    CREATE NEW PARENT
+    CREATE NEW PARENT WITH ALL CHILDREN
     =====================================
     */
-
-    const newParent =
-      await User.create({
-
-        parentId:
-          generateId("PAR"),
-
-        schoolId,
-
-        parent: {
-
-          name:
-            parent.name,
-
-          phone:
-            parent.phone,
-        },
-
-        children: [
-          childData,
-        ],
-
-        status: {
-          active: true,
-        },
-      });
+    const newParent = await User.create({
+      parentId: generateId("PAR"),
+      schoolId,
+      parent: {
+        name: parent.name,
+        phone: parent.phone,
+      },
+      children: childrenDataArray, // Assigns the entire pre-mapped child configuration matrix
+      status: {
+        active: true,
+      },
+    });
 
     return res.status(201).json({
-
       success: true,
-
-      message:
-        "Parent and child created successfully",
-
-      data:
-        newParent,
+      message: "Parent profile database matrix and corresponding child structures synchronized.",
+      data: newParent,
     });
 
   } catch (err) {
-
     return res.status(500).json({
-
       success: false,
-
-      error:
-        err.message,
+      error: err.message,
     });
   }
 };
+exports.addChild = async (req, res) => {
+  try {
+    const { parentId } = req.params;
+  const { schoolId } = req.user;
+    // Validate parentId exists
+    if (!parentId ||parentId==="undefined") {
+      return res.status(400).json({
+        success: false,
+        message: "Parent ID is required",
+      });
+    }
 
+    const {
+      
+      studentId,
+      name,
+      class: studentClass,
+      section,
+      rollNumber,
+      busNumber,
+      pickupPointId,
+    } = req.body;
+
+    const missingFields = [];
+
+  
+
+    if (!studentId)
+      missingFields.push("studentId");
+
+    if (!name)
+      missingFields.push("name");
+
+    if (!studentClass)
+      missingFields.push("class");
+
+    if (!section)
+      missingFields.push("section");
+
+    if (!rollNumber)
+      missingFields.push("rollNumber");
+
+    if (!busNumber)
+      missingFields.push("busNumber");
+
+    if (!pickupPointId)
+      missingFields.push(
+        "pickupPointId"
+      );
+
+    if (missingFields.length) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Required fields missing",
+        missingFields,
+      });
+    }
+
+    const user =
+      await User.findOne({ parentId,schoolId });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Parent not found",
+      });
+    }
+const childId= generateId("CHI"); 
+    user.children.push({
+      childId,
+      studentId,
+      name,
+      class: studentClass,
+      section,
+      rollNumber,
+      busNumber,
+      pickupPointId,
+      status: {
+        active: true,
+      },
+    });
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Child added successfully",
+      data: user,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+};
 /*
 ================================================================================
 4. SEND LOGIN OTP
@@ -482,9 +525,10 @@ exports.sendOTP = async (req, res) => {
   try {
 
     const {
-      schoolId,
+      
       parentPhone,
     } = req.body;
+   const { schoolId } = req.user;
 
     if (
       !schoolId ||
@@ -580,10 +624,11 @@ exports.verifyOTP = async (req, res) => {
   try {
 
     const {
-      schoolId,
+      
       parentPhone,
       otp,
     } = req.body;
+   const { schoolId } = req.user;
 
     const user =
       await User.findOne({
@@ -676,9 +721,10 @@ exports.resendOTP = async (req, res) => {
   try {
 
     const {
-      schoolId,
+      
       parentPhone,
     } = req.body;
+   const { schoolId } = req.user;
 
     const user =
       await User.findOne({
@@ -752,104 +798,85 @@ exports.resendOTP = async (req, res) => {
 */
 
 exports.updateStudent = async (req, res) => {
-
   try {
+    const { parentId } = req.params;
+    const { schoolId } = req.user;
 
-    const {
-      parentId,
-      childId,
-    } = req.params;
+    const { 
+      parent, 
+      child, // The dynamic array sent from frontend matrix
+      busNumber, 
+      pickupPointId 
+    } = req.body;
 
-    const updates =
-      req.body;
-
-    const user =
-      await User.findOne({
-        parentId,
-      });
+    // Find the master parent document
+    const user = await User.findOne({
+      _id: parentId,
+      schoolId: schoolId
+    });
 
     if (!user) {
-
       return res.status(404).json({
-
         success: false,
-
-        message:
-          "Parent not found",
-      });
-    }
-
-    const child =
-      user.children.find(
-        (c) =>
-          c.childId === childId
-      );
-
-    if (!child) {
-
-      return res.status(404).json({
-
-        success: false,
-
-        message:
-          "Child not found",
+        message: "Parent profile not found",
       });
     }
 
     /*
     =====================================
-    SAFE UPDATES ONLY
+    1. UPDATE PARENT CORE DATA
     =====================================
     */
+    if (parent) {
+      if (parent.name !== undefined) user.parent.name = parent.name;
+      if (parent.phone !== undefined) user.parent.phone = parent.phone;
+    }
 
-    const allowedFields = [
+    /*
+    =====================================
+    2. SYNCHRONIZE CHILD NESTED STACK
+    =====================================
+    */
+    if (child && Array.isArray(child)) {
+      user.children = child.map(c => {
+        // Generate clean custom tracking strings
+        const calculatedStudentId = c.studentId || `STU-${Date.now().toString().slice(-6)}`;
+        
+        // Match existing document _id if available, otherwise let Mongoose create an ObjectId
+        const subdocId = (c._id && mongoose.Types.ObjectId.isValid(c._id)) ? c._id : new mongoose.Types.ObjectId();
 
-      "name",
+        return {
+          _id: subdocId, 
+           // Fulfills schema: required: true
+          studentId: calculatedStudentId, // Fulfills schema: required: true
+          name: c.studentName || c.name,
+          class: c.class || "N/A",
+          section: c.section || "-",     // Fulfills schema validation if empty string
+          rollNumber: c.rollNumber || "-", // Fulfills schema validation if empty string
+          busNumber: busNumber || c.busNumber || "Unassigned",
+          pickupPointId: pickupPointId || c.pickupPointId || null,
+          status: { active: true }
+        };
+      });
+    }
 
-      "class",
-
-      "section",
-
-      "rollNumber",
-
-      "busNumber",
-
-      "pickupPointId",
-    ];
-
-    allowedFields.forEach(
-      (field) => {
-
-        if (
-          updates[field] !== undefined
-        ) {
-
-          child[field] =
-            updates[field];
-        }
-      }
-    );
-
+    /*
+    =====================================
+    3. SAVE CHANGES
+    =====================================
+    */
     await user.save();
 
     return res.status(200).json({
-
       success: true,
-
-      message:
-        "Child updated successfully",
-
+      message: "Parent workspace node and nested student array updated completely!",
       data: user,
     });
 
   } catch (err) {
-
     return res.status(500).json({
-
       success: false,
-
-      error:
-        err.message,
+      error: err.message,
     });
   }
 };
@@ -860,110 +887,113 @@ exports.updateStudent = async (req, res) => {
 ================================================================================
 */
 
-exports.deleteStudent = async (req, res) => {
-
+exports.deleteParent = async (req, res) => {
   try {
+    const { parentId } = req.params; // Extracted from URL params
+    const { schoolId } = req.user;   // Extracted from auth middleware
 
+    if (!parentId) {
+      return res.status(400).json({
+        success: false,
+        message: "Parent ID is required",
+      });
+    }
+
+    // Direct deletion query using only parentId and schoolId custom fields
+    const result = await User.deleteOne({
+      parentId: parentId,
+      schoolId: schoolId,
+    });
+
+    // Check if a document was actually found and deleted
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Parent profile not found under this school context",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Parent and all nested children deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error executing parent deletion query:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error during document deletion process",
+    });
+  }
+};
+exports.deleteChild = async (
+  req,
+  res
+) => {
+  try {
     const {
       parentId,
       childId,
     } = req.params;
 
-    const user =
+    const { schoolId } =
+      req.user;
+
+    const parent =
       await User.findOne({
         parentId,
+        schoolId,
       });
 
-    if (!user) {
-
+    if (!parent) {
       return res.status(404).json({
-
         success: false,
-
         message:
           "Parent not found",
       });
     }
 
-    const existingChild =
-      user.children.find(
-        (c) =>
-          c.childId === childId
+    const childExists =
+      parent.children.some(
+        (child) =>
+          child.studentId ===
+          childId
       );
 
-    if (!existingChild) {
-
+    if (!childExists) {
       return res.status(404).json({
-
         success: false,
-
         message:
-          "Child not found",
+          "Student not found",
       });
     }
 
-    /*
-    =====================================
-    REMOVE CHILD
-    =====================================
-    */
-
-    user.children =
-      user.children.filter(
-        (c) =>
-          c.childId !== childId
+    parent.children =
+      parent.children.filter(
+        (child) =>
+          child.studentId !==
+          childId
       );
 
-    /*
-    =====================================
-    DELETE PARENT
-    IF NO CHILDREN
-    =====================================
-    */
-
-    if (
-      user.children.length === 0
-    ) {
-
-      await User.deleteOne({
-        parentId,
-      });
-
-      return res.status(200).json({
-
-        success: true,
-
-        message:
-          "Parent and child deleted successfully",
-      });
-    }
-
-    await user.save();
+    await parent.save();
 
     return res.status(200).json({
-
       success: true,
-
       message:
-        "Child deleted successfully",
-
-      data: user,
+        "Student deleted successfully",
+      data: parent,
     });
-
-  } catch (err) {
+  } catch (error) {
+    console.log(error);
 
     return res.status(500).json({
-
       success: false,
-
-      error:
-        err.message,
+      message:
+        "Server Error",
     });
   }
 };
-
-/*
-================================================================================
+/*================================================================================
 9. SAVE FCM TOKEN
 ================================================================================
 */
@@ -976,6 +1006,8 @@ exports.saveFcmToken = async (req, res) => {
       parentId,
       fcmToken,
     } = req.body;
+
+    const { schoolId } = req.user;
 
     if (
       !parentId ||
@@ -1038,5 +1070,182 @@ exports.saveFcmToken = async (req, res) => {
       error:
         err.message,
     });
+  }
+};
+
+/*
+================================================================================
+10. GET PARENT BY ID
+================================================================================
+*/
+
+exports.getParentById = async (req, res) => {
+  try {
+
+    const { parentId } = req.params;
+    const { schoolId } = req.user;
+
+    const user = await User.findOne({
+      parentId,
+      schoolId,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Parent not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: user,
+    });
+
+  } catch (err) {
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+
+  }
+};
+
+/*
+================================================================================
+11. GET PARENTS PAGINATION
+================================================================================
+*/
+
+exports.getParentsPagination = async (req, res) => {
+
+  try {
+
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+    } = req.query;
+
+    page = Number(page);
+    limit = Number(limit);
+
+    const query = {};
+
+    if (search) {
+      query.$or = [
+        {
+          "parent.name": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          "parent.phone": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          parentId: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    const totalRecords =
+      await User.countDocuments(query);
+
+    const data =
+      await User.find(query)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit);
+
+    return res.status(200).json({
+
+      success: true,
+
+      pagination: {
+        totalRecords,
+        currentPage: page,
+        totalPages: Math.ceil(
+          totalRecords / limit
+        ),
+        limit,
+      },
+
+      data,
+    });
+
+  } catch (err) {
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+
+  }
+};
+
+/*
+================================================================================
+12. GET SINGLE CHILD
+================================================================================
+*/
+
+exports.getChildById = async (req, res) => {
+
+  try {
+
+    const {
+      parentId,
+      childId,
+    } = req.params;
+
+    const user =
+      await User.findOne({
+        parentId,
+      });
+
+    if (!user) {
+
+      return res.status(404).json({
+        success: false,
+        message: "Parent not found",
+      });
+    }
+
+    const child =
+      user.children.find(
+        (c) =>
+          c.childId === childId
+      );
+
+    if (!child) {
+
+      return res.status(404).json({
+        success: false,
+        message: "Child not found",
+      });
+    }
+
+    return res.status(200).json({
+
+      success: true,
+
+      data: child,
+    });
+
+  } catch (err) {
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+
   }
 };

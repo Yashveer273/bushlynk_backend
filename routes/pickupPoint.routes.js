@@ -11,7 +11,7 @@ const {
   editPickupPoint,
   changeBusId,
   removeCompleteBusPickupPoints,
-  getPaginatedBusesWithPickupPoints,getPickupPointsByBus
+  getPaginatedBusesWithPickupPoints,getPickupPointsByBus,getPickupPointById
 } = require("../controllers/pickupPoint.Controller");
 const { auth } = require("../middlewares/school.auth");
 /*
@@ -46,7 +46,11 @@ Thunder Client Body:
   }
 }
 */
-
+router.get(
+  "/pickup-points/:id",
+  auth,
+ getPickupPointById
+);
 router.post("/create", auth, createPickupPoint);
 router.put("/edit", auth, editPickupPoint);
 router.get(

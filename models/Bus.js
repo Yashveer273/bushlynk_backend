@@ -16,7 +16,11 @@ const busSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-
+    defaultAsignDriver: {
+      DriverId: String,
+      DriverName:String,
+      phone:String,
+    },
     /*
       Assigned driver
     */
@@ -25,13 +29,7 @@ const busSchema = new mongoose.Schema(
       assignedAt: Date,
       driverName: String,
     },
-    liveLocation: {
-      lat: Number,
-      lng: Number,
-      speed: Number,
-      heading: Number,
-      updatedAt: Number,
-    },
+   
 
     status: {
       active: {

@@ -2,7 +2,8 @@
 
 const Driver = require("../models/Driver");
 const Bus = require("../models/Bus");
-
+const jwt = require("jsonwebtoken");
+  const secret = "0000000";
 /*
 ========================================
 1. CREATE DRIVER
@@ -303,7 +304,247 @@ exports.getDriverByBus = async (req, res) => {
     });
   }
 };
+exports.getDriverLoginHistory = async (req, res) => {
+  try {
+    const { schoolId, driverId, phone } = req.body;
 
+    /*
+    ========================================
+    VALIDATION
+    ========================================
+    */
+
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message: "School ID is required",
+      });
+    }
+
+    if (!driverId && !phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Driver ID or Phone is required",
+      });
+    }
+
+    /*
+    ========================================
+    BUILD QUERY (STRICT SCHOOL ISOLATION)
+    ========================================
+    */
+
+    const query = {
+      schoolId: schoolId.trim(),
+    };
+
+    if (driverId && phone) {
+      query.driverId = driverId.trim();
+      query.phone = phone.trim();
+    } else if (driverId) {
+      query.driverId = driverId.trim();
+    } else {
+      query.phone = phone.trim();
+    }
+
+    /*
+    ========================================
+    FIND DRIVER
+    ========================================
+    */
+
+    const driver = await Driver.findOne(query).select(
+      "schoolId driverId name phone loginHistory"
+    );
+
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Driver not found for this school with provided details",
+      });
+    }
+
+    /*
+    ========================================
+    FILTER LAST 30 DAYS HISTORY
+    ========================================
+    */
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const loginHistory = driver.loginHistory
+      .filter(
+        (entry) =>
+          new Date(entry.loginAt) >= thirtyDaysAgo
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.loginAt) - new Date(a.loginAt)
+      );
+
+    /*
+    ========================================
+    RESPONSE
+    ========================================
+    */
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        schoolId: driver.schoolId,
+        driverId: driver.driverId,
+        name: driver.name,
+        phone: driver.phone,
+        totalLogins: loginHistory.length,
+        loginHistory,
+      },
+    });
+  } catch (error) {
+    console.error("Login History Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.driverLogin = async (req, res) => {
+ 
+  try {
+    const { schoolId, phone } = req.body;
+
+    /*
+    ========================================
+    VALIDATION
+    ========================================
+    */
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message: "School ID is required",
+      });
+    }
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone is required",
+      });
+    }
+
+    /*
+    ========================================
+    FIND DRIVER (OPTIMIZED QUERY)
+    ========================================
+    */
+    const driver = await Driver.findOne({
+      schoolId,
+      phone,
+    });
+
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: "Driver not found for this school",
+      });
+    }
+
+    /*
+    ========================================
+    REMOVE OLD LOGIN HISTORY (30 DAYS)
+    ========================================
+    */
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    driver.loginHistory = driver.loginHistory.filter(
+      (item) => new Date(item.loginAt) >= thirtyDaysAgo
+    );
+
+    /*
+    ========================================
+    CLOSE PREVIOUS SESSION
+    ========================================
+    */
+    const openSession = [...driver.loginHistory]
+      .reverse()
+      .find((item) => !item.logoutAt);
+
+    if (openSession) {
+      openSession.logoutAt = new Date();
+    }
+
+    /*
+    ========================================
+    GENERATE JWT TOKEN
+    ========================================
+    */
+    const token = jwt.sign(
+      {
+        id: driver._id,
+        driverId: driver.driverId,
+        schoolId: driver.schoolId,
+        tokenVersion: driver.tokenVersion,
+      },
+      secret,
+      {
+        expiresIn: "30d",
+      }
+    );
+
+    /*
+    ========================================
+    SAVE TOKEN
+    ========================================
+    */
+    driver.token = token;
+
+    /*
+    ========================================
+    ADD LOGIN HISTORY
+    ========================================
+    */
+    driver.loginHistory.push({
+      loginAt: new Date(),
+      logoutAt: null,
+      ipAddress:
+        req.headers["x-forwarded-for"] ||
+        req.socket.remoteAddress ||
+        "",
+      deviceInfo: req.headers["user-agent"] || "",
+    });
+
+    await driver.save();
+
+    /*
+    ========================================
+    RESPONSE
+    ========================================
+    */
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      token,
+      driver: {
+        id: driver._id,
+        driverId: driver.driverId,
+        schoolId: driver.schoolId,
+        name: driver.name,
+        phone: driver.phone,
+        CurentJob: driver.CurentJob,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
 /*
 ========================================
 5. START DRIVER JOB
@@ -530,6 +771,73 @@ exports.endDriverJob = async (req, res) => {
     return res.status(500).json({
       success: false,
       error: err.message,
+    });
+  }
+};
+exports.getDefaultAssignedBus = async (req, res) => {
+  try {
+   
+    const { driverId,schoolId } = req.body;
+
+    if (!schoolId || !driverId) {
+      return res.status(400).json({
+        success: false,
+        message: "schoolId and driverId are required",
+      });
+    }
+ const driver = await Driver.findOne({
+      schoolId,
+      driverId,
+    });
+    
+
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: "Driver not found",
+      });
+    }
+
+    if (!driver.defaultAsignBusNumber) {
+      return res.status(404).json({
+        success: false,
+        message: "No default bus assigned to this driver",
+      });
+    }
+const buses = await Bus.findOne({
+  schoolId,
+}).select({
+  busNumber: 1,
+  busAsignNumber: 1,
+  defaultAsignDriver: 1,
+});
+
+    if (!buses) {
+      return res.status(404).json({
+        success: false,
+        message: "Assigned bus not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Default assigned bus fetched successfully",
+      data: {
+        driver: {
+          driverId: driver.driverId,
+          name: driver.name,
+          phone: driver.phone,
+          defaultAsignBusNumber: driver.defaultAsignBusNumber,
+        },
+        buses,
+      },
+    });
+  } catch (err) {
+    console.log("Get default assigned bus error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
     });
   }
 };

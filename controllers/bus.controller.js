@@ -2,8 +2,79 @@ const generateId = require("../utils/generateId");
 
 const Bus = require("../models/Bus");
 const School = require("../models/School");
+const Driver = require("../models/Driver");
 const User = require("../models/students");
 
+
+
+
+exports.assignDefaultDriverToBus = async (req, res) => {
+  try {
+    const { busNumber, driverId } = req.body;
+    const { schoolId } = req.user;
+
+    if (!schoolId || !busNumber || !driverId) {
+      return res.status(400).json({
+        success: false,
+        message: "schoolId, busNumber and driverId are required",
+      });
+    }
+
+   
+
+    const driver = await Driver.findOne({
+      schoolId,
+      driverId,
+    });
+
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: "Driver not found",
+      });
+    }
+
+    const bus = await Bus.findOne({
+      schoolId,
+      busNumber,
+    });
+
+    if (!bus) {
+      return res.status(404).json({
+        success: false,
+        message: "Bus not found",
+      });
+    }
+
+    bus.defaultAsignDriver = {
+      DriverId: driver.driverId,
+      DriverName: driver.name,
+      phone: driver.phone,
+    };
+
+    await bus.save();
+
+    driver.defaultAsignBusNumber = bus.busNumber;
+
+    await driver.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Default driver assigned to bus successfully",
+      data: {
+        bus,
+        driver,
+      },
+    });
+  } catch (err) {
+    console.log("Assign default driver error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
 /*
 ============================================================
 1. REGISTER BUS
