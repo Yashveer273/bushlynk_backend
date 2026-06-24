@@ -562,12 +562,6 @@ exports.startDriverJob = async (req, res) => {
   try {
     const { schoolId, driverId, password, busNumber } = req.body;
 
-    /*
-    ========================================
-    VALIDATE INPUTS
-    ========================================
-    */
-
     if (!schoolId || !driverId || !password || !busNumber) {
       return res.status(400).json({
         success: false,
@@ -575,17 +569,13 @@ exports.startDriverJob = async (req, res) => {
       });
     }
 
-    /*
-    ========================================
-    VALIDATE DRIVER
-    ========================================
-    */
-
     const driver = await Driver.findOne({
       schoolId,
       driverId,
       password,
-    });
+    }).select(
+      "driverId schoolId name phone CurentJob defaultAsignBusNumber"
+    );
 
     if (!driver) {
       return res.status(401).json({
@@ -594,12 +584,6 @@ exports.startDriverJob = async (req, res) => {
       });
     }
 
-    /*
-    ========================================
-    DRIVER ALREADY ACTIVE
-    ========================================
-    */
-
     if (driver.CurentJob?.busNumber) {
       return res.status(400).json({
         success: false,
@@ -607,16 +591,12 @@ exports.startDriverJob = async (req, res) => {
       });
     }
 
-    /*
-    ========================================
-    FIND BUS
-    ========================================
-    */
-
     const bus = await Bus.findOne({
       schoolId,
       busNumber,
-    });
+    }).select(
+      "schoolId busNumber busAsignNumber driverlogin status"
+    );
 
     if (!bus) {
       return res.status(404).json({
@@ -625,12 +605,6 @@ exports.startDriverJob = async (req, res) => {
       });
     }
 
-    /*
-    ========================================
-    BUS ALREADY OCCUPIED
-    ========================================
-    */
-
     if (bus.driverlogin?.driverId) {
       return res.status(400).json({
         success: false,
@@ -638,37 +612,19 @@ exports.startDriverJob = async (req, res) => {
       });
     }
 
-    /*
-    ========================================
-    ASSIGN DRIVER TO BUS
-    ========================================
-    */
-
     bus.driverlogin = {
       driverId: driver.driverId,
-
       driverName: driver.name,
-
       assignedAt: new Date(),
     };
 
     bus.status.tripStarted = true;
-
     await bus.save();
-
-    /*
-    ========================================
-    SAVE DRIVER CURRENT JOB
-    ========================================
-    */
 
     driver.CurentJob = {
       schoolId,
-
       busNumber: bus.busNumber,
-
       busAsignNumber: bus.busAsignNumber,
-
       startedAt: new Date(),
     };
 
@@ -677,10 +633,17 @@ exports.startDriverJob = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Driver job started",
-
       data: {
-        driver,
-        bus,
+        job: {
+          schoolId,
+          driverId: driver.driverId,
+          driverName: driver.name,
+          phone: driver.phone,
+          busNumber: bus.busNumber,
+          busAsignNumber: bus.busAsignNumber,
+          startedAt: driver.CurentJob.startedAt,
+          tripStarted: bus.status.tripStarted,
+        },
       },
     });
   } catch (err) {
@@ -698,12 +661,12 @@ exports.startDriverJob = async (req, res) => {
 */
 exports.endDriverJob = async (req, res) => {
   try {
-    const { driverId } = req.body;
+    const { driverId,schoolId } = req.body;
 
-    if (!driverId) {
+    if (!driverId ||!schoolId)  {
       return res.status(400).json({
         success: false,
-        message: "driverId required",
+        message: "driverId,s choolId required",
       });
     }
 
@@ -713,7 +676,7 @@ exports.endDriverJob = async (req, res) => {
     ========================================
     */
 
-    const driver = await Driver.findOne({ driverId });
+    const driver = await Driver.findOne({ driverId,schoolId });
 
     if (!driver) {
       return res.status(404).json({
