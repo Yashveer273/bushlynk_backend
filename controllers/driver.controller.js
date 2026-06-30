@@ -3,7 +3,7 @@
 const Driver = require("../models/Driver");
 const Bus = require("../models/Bus");
 const jwt = require("jsonwebtoken");
-  const secret = "0000000";
+const secret = "0000000";
 /*
 ========================================
 1. CREATE DRIVER
@@ -354,14 +354,13 @@ exports.getDriverLoginHistory = async (req, res) => {
     */
 
     const driver = await Driver.findOne(query).select(
-      "schoolId driverId name phone loginHistory"
+      "schoolId driverId name phone loginHistory",
     );
 
     if (!driver) {
       return res.status(404).json({
         success: false,
-        message:
-          "Driver not found for this school with provided details",
+        message: "Driver not found for this school with provided details",
       });
     }
 
@@ -375,14 +374,8 @@ exports.getDriverLoginHistory = async (req, res) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const loginHistory = driver.loginHistory
-      .filter(
-        (entry) =>
-          new Date(entry.loginAt) >= thirtyDaysAgo
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.loginAt) - new Date(a.loginAt)
-      );
+      .filter((entry) => new Date(entry.loginAt) >= thirtyDaysAgo)
+      .sort((a, b) => new Date(b.loginAt) - new Date(a.loginAt));
 
     /*
     ========================================
@@ -413,7 +406,6 @@ exports.getDriverLoginHistory = async (req, res) => {
 };
 
 exports.driverLogin = async (req, res) => {
- 
   try {
     const { schoolId, phone } = req.body;
 
@@ -462,7 +454,7 @@ exports.driverLogin = async (req, res) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     driver.loginHistory = driver.loginHistory.filter(
-      (item) => new Date(item.loginAt) >= thirtyDaysAgo
+      (item) => new Date(item.loginAt) >= thirtyDaysAgo,
     );
 
     /*
@@ -493,7 +485,7 @@ exports.driverLogin = async (req, res) => {
       secret,
       {
         expiresIn: "30d",
-      }
+      },
     );
 
     /*
@@ -512,9 +504,7 @@ exports.driverLogin = async (req, res) => {
       loginAt: new Date(),
       logoutAt: null,
       ipAddress:
-        req.headers["x-forwarded-for"] ||
-        req.socket.remoteAddress ||
-        "",
+        req.headers["x-forwarded-for"] || req.socket.remoteAddress || "",
       deviceInfo: req.headers["user-agent"] || "",
     });
 
@@ -573,9 +563,7 @@ exports.startDriverJob = async (req, res) => {
       schoolId,
       driverId,
       password,
-    }).select(
-      "driverId schoolId name phone CurentJob defaultAsignBusNumber"
-    );
+    }).select("driverId schoolId name phone CurentJob defaultAsignBusNumber");
 
     if (!driver) {
       return res.status(401).json({
@@ -594,9 +582,7 @@ exports.startDriverJob = async (req, res) => {
     const bus = await Bus.findOne({
       schoolId,
       busNumber,
-    }).select(
-      "schoolId busNumber busAsignNumber driverlogin status"
-    );
+    }).select("schoolId busNumber busAsignNumber driverlogin status");
 
     if (!bus) {
       return res.status(404).json({
@@ -661,9 +647,9 @@ exports.startDriverJob = async (req, res) => {
 */
 exports.endDriverJob = async (req, res) => {
   try {
-    const { driverId,schoolId } = req.body;
+    const { driverId, schoolId } = req.body;
 
-    if (!driverId ||!schoolId)  {
+    if (!driverId || !schoolId) {
       return res.status(400).json({
         success: false,
         message: "driverId,s choolId required",
@@ -676,7 +662,7 @@ exports.endDriverJob = async (req, res) => {
     ========================================
     */
 
-    const driver = await Driver.findOne({ driverId,schoolId });
+    const driver = await Driver.findOne({ driverId, schoolId });
 
     if (!driver) {
       return res.status(404).json({
@@ -739,8 +725,8 @@ exports.endDriverJob = async (req, res) => {
 };
 exports.getDefaultAssignedBus = async (req, res) => {
   try {
-   
-    const { driverId,schoolId } = req.body;
+
+    const { driverId, schoolId } = req.body;
 
     if (!schoolId || !driverId) {
       return res.status(400).json({
@@ -748,11 +734,10 @@ exports.getDefaultAssignedBus = async (req, res) => {
         message: "schoolId and driverId are required",
       });
     }
- const driver = await Driver.findOne({
+    const driver = await Driver.findOne({
       schoolId,
       driverId,
     });
-    
 
     if (!driver) {
       return res.status(404).json({
@@ -767,13 +752,13 @@ exports.getDefaultAssignedBus = async (req, res) => {
         message: "No default bus assigned to this driver",
       });
     }
-const buses = await Bus.findOne({
-  schoolId,
-}).select({
-  busNumber: 1,
-  busAsignNumber: 1,
-  defaultAsignDriver: 1,
-});
+    const buses = await Bus.findOne({
+      schoolId,
+    }).select({
+      busNumber: 1,
+      busAsignNumber: 1,
+      defaultAsignDriver: 1,
+    });
 
     if (!buses) {
       return res.status(404).json({

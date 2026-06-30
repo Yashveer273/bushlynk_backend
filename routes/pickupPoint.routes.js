@@ -11,9 +11,9 @@ const {
   editPickupPoint,
   changeBusId,
   removeCompleteBusPickupPoints,
-  getPaginatedBusesWithPickupPoints,getPickupPointsByBus,getPickupPointById
+  getPaginatedBusesWithPickupPoints,admin_getPickupPointsByBus,driver_getPickupPointsByBus,getPickupPointById
 } = require("../controllers/pickupPoint.Controller");
-const { auth } = require("../middlewares/school.auth");
+const { auth,driverAuth } = require("../middlewares/school.auth");
 /*
 ==================================================
 1. CREATE PICKUP POINT
@@ -61,7 +61,13 @@ router.get(
 router.get(
   "/get-pickup-points/:busNumber",
   auth,
-  getPickupPointsByBus,
+  admin_getPickupPointsByBus,
+);
+
+router.get(
+  "/driver_get-pickup-points/:busNumber",
+  driverAuth,
+  driver_getPickupPointsByBus,
 );
 router.put("/change-bus-id", auth, changeBusId);
 /*

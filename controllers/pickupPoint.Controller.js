@@ -1466,7 +1466,7 @@ PICKUP POINT PAGINATION
 ========================================
 */
 
-exports.getPickupPointsByBus =
+exports.admin_getPickupPointsByBus =
   async (req, res) => {
 
     try {
@@ -1601,3 +1601,64 @@ exports.getPickupPointsByBus =
       });
     }
   };
+
+exports.driver_getPickupPointsByBus = async (req, res) => {
+  try {
+    const { busNumber } = req.params;
+    const schoolId = req.schoolId;
+
+    const page = req.query.page ? Number(req.query.page) : null;
+    const limit = req.query.limit ? Number(req.query.limit) : null;
+
+    const pickupDoc = await PickupPoint.findOne({
+      schoolId,
+      busNumber,
+    }).lean();
+
+    if (!pickupDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Bus pickup points not found",
+      });
+    }
+
+    const totalPickupPoints = pickupDoc.pickupPoints?.length || 0;
+
+    const reversedPickupPoints = [
+      ...(pickupDoc.pickupPoints || []),
+    ].reverse();
+
+    let pickupPoints = reversedPickupPoints;
+    let pagination = null;
+
+    if (page && limit) {
+      const skip = (page - 1) * limit;
+
+      pickupPoints = reversedPickupPoints.slice(skip, skip + limit);
+
+      pagination = {
+        currentPage: page,
+        limit,
+        totalPickupPoints,
+        totalPages: Math.ceil(totalPickupPoints / limit),
+      };
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Pickup points fetched successfully",
+      data: {
+        busNumber: pickupDoc.busNumber,
+        pickupPoints,
+      },
+      pagination,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+};

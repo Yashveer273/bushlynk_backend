@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-
+const Driver = require("../models/Driver");
 const School = require("../models/School");
 
 exports.auth = async (req, res, next) => {
@@ -109,6 +109,43 @@ phone: school.phone,
       success: false,
 
       message: "Invalid token",
+    });
+  }
+};
+
+
+exports.driverAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        message: "Token missing",
+      });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    const driver = await Driver.findOne({ token }).lean();
+
+    if (!driver) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid token",
+      });
+    }
+
+    req.driver = driver;
+    req.schoolId = driver.schoolId;
+
+    next();
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Auth server error",
     });
   }
 };
