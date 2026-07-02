@@ -13,7 +13,7 @@ const {
   endDriverJob,
   driverLogin,
   getDriverLoginHistory,
-  getDefaultAssignedBus
+  getDefaultAssignedBus,getDriverBusJobStatus
   
 } = require("../controllers/driver.controller");
 
@@ -21,7 +21,10 @@ const {
   Assign driver
 */
 router.post("/createDriver",auth, createDriver);
-
+router.get(
+  "/job-status/firebase/:schoolId/:driverId",
+  getDriverBusJobStatus
+);
 /*
   Remove driver
 */

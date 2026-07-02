@@ -2,6 +2,7 @@
 
 const Driver = require("../models/Driver");
 const Bus = require("../models/Bus");
+const {db } = require("../config/firebase");
 const jwt = require("jsonwebtoken");
 const secret = "0000000";
 /*
@@ -548,6 +549,8 @@ BODY:
   "busNumber": "BUS101"
 }
 */
+
+// START / SWITCH BUS
 exports.startDriverJob = async (req, res) => {
   try {
     const { schoolId, driverId, password, busNumber } = req.body;
@@ -555,7 +558,7 @@ exports.startDriverJob = async (req, res) => {
     if (!schoolId || !driverId || !password || !busNumber) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required",
+        message: "schoolId, driverId, password and busNumber are required",
       });
     }
 
@@ -572,17 +575,8 @@ exports.startDriverJob = async (req, res) => {
       });
     }
 
-    if (driver.CurentJob?.busNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "Driver already on active trip",
-      });
-    }
-
-    const bus = await Bus.findOne({
-      schoolId,
-      busNumber,
-    }).select("schoolId busNumber busAsignNumber driverlogin status");
+    const bus = await Bus.findOne({ schoolId, busNumber })
+      .select("schoolId busNumber busAsignNumber driverlogin status");
 
     if (!bus) {
       return res.status(404).json({
@@ -591,135 +585,301 @@ exports.startDriverJob = async (req, res) => {
       });
     }
 
-    if (bus.driverlogin?.driverId) {
+    // ✅ 1. Check Firebase bus occupation
+    const firebaseBusRef = db
+      .ref(`busJobs/${schoolId}/${busNumber}`);
+
+    const firebaseBusSnap = await firebaseBusRef.once("value");
+    const firebaseBusData = firebaseBusSnap.val();
+
+    if (
+      firebaseBusData?.isOccupied === true &&
+      firebaseBusData?.driverId !== driverId
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Bus already occupied",
+        message: "Bus already occupied. Please select another bus.",
+        isOccupied: true,
+        occupiedByMe: false,
+        stopRequired: false,
       });
     }
 
+    // ✅ 2. Check MongoDB bus occupation
+    if (
+      bus.driverlogin?.driverId &&
+      bus.driverlogin.driverId !== driverId
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Bus already occupied in bus schema. Please select another bus.",
+        isOccupied: true,
+        occupiedByMe: false,
+        stopRequired: false,
+      });
+    }
+
+    // ✅ If same bus already occupied by same driver
+    if (
+      firebaseBusData?.isOccupied === true &&
+      firebaseBusData?.driverId === driverId
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "This bus is already occupied by you. Please stop this bus first.",
+        isOccupied: true,
+        occupiedByMe: true,
+        stopRequired: true,
+      });
+    }
+
+    const startedAt = new Date();
+
+    // ✅ 3. Occupy selected bus in MongoDB
     bus.driverlogin = {
       driverId: driver.driverId,
       driverName: driver.name,
-      assignedAt: new Date(),
+      assignedAt: startedAt,
     };
 
-    bus.status.tripStarted = true;
+    bus.status = {
+      ...(bus.status || {}),
+      active: true,
+      tripStarted: true,
+    };
+
     await bus.save();
 
+    // ✅ 4. Replace only driver's current job with latest selected bus
     driver.CurentJob = {
       schoolId,
       busNumber: bus.busNumber,
       busAsignNumber: bus.busAsignNumber,
-      startedAt: new Date(),
+      startedAt,
     };
 
     await driver.save();
 
+    // ✅ 5. Create/update per-bus Firebase record
+    await firebaseBusRef.update({
+      isOccupied: true,
+      schoolId,
+      driverId: driver.driverId,
+      driverName: driver.name,
+      phone: driver.phone,
+      busNumber: bus.busNumber,
+      busAsignNumber: bus.busAsignNumber,
+      startedAt: startedAt.toISOString(),
+      endedAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    // ✅ 6. Update driver's latest current job in Firebase
+    await db
+      .ref(`driverJobs/${schoolId}/${driver.driverId}`)
+      .update({
+        isJobActive: true,
+        schoolId,
+        driverId: driver.driverId,
+        driverName: driver.name,
+        phone: driver.phone,
+        currentBusNumber: bus.busNumber,
+        currentBusAsignNumber: bus.busAsignNumber,
+        startedAt: startedAt.toISOString(),
+        endedAt: null,
+        updatedAt: new Date().toISOString(),
+      });
+
     return res.status(200).json({
       success: true,
-      message: "Driver job started",
+      message: "Bus started successfully",
       data: {
-        job: {
-          schoolId,
-          driverId: driver.driverId,
-          driverName: driver.name,
-          phone: driver.phone,
-          busNumber: bus.busNumber,
-          busAsignNumber: bus.busAsignNumber,
-          startedAt: driver.CurentJob.startedAt,
-          tripStarted: bus.status.tripStarted,
-        },
+        isJobActive: true,
+        busNumber: bus.busNumber,
+        busAsignNumber: bus.busAsignNumber,
+        driverId: driver.driverId,
+        driverName: driver.name,
+        startedAt,
       },
     });
   } catch (err) {
     return res.status(500).json({
       success: false,
+      message: "Start driver job failed",
       error: err.message,
     });
   }
 };
 
-/*
-========================================
-6. END DRIVER JOB
-========================================
-*/
+
+// STOP SELECTED BUS
 exports.endDriverJob = async (req, res) => {
   try {
-    const { driverId, schoolId } = req.body;
+    const { schoolId, driverId, password, busNumber } = req.body;
 
-    if (!driverId || !schoolId) {
+    if (!schoolId || !driverId || !password || !busNumber) {
       return res.status(400).json({
         success: false,
-        message: "driverId,s choolId required",
+        message: "schoolId, driverId, password and busNumber are required",
       });
     }
 
-    /*
-    ========================================
-    FIND DRIVER
-    ========================================
-    */
-
-    const driver = await Driver.findOne({ driverId, schoolId });
+    const driver = await Driver.findOne({
+      schoolId,
+      driverId,
+      password,
+    });
 
     if (!driver) {
-      return res.status(404).json({
+      return res.status(401).json({
         success: false,
-        message: "Driver not found",
+        message: "Invalid credentials",
       });
     }
 
-    /*
-    ========================================
-    CHECK ACTIVE JOB
-    ========================================
-    */
+    const firebaseBusRef = db
+      .ref(`busJobs/${schoolId}/${busNumber}`);
 
-    if (!driver.CurentJob?.busNumber) {
+    const firebaseBusSnap = await firebaseBusRef.once("value");
+    const firebaseBusData = firebaseBusSnap.val();
+
+    if (!firebaseBusData || firebaseBusData.isOccupied !== true) {
       return res.status(400).json({
         success: false,
-        message: "No active trip",
+        message: "This bus is not active",
       });
     }
 
-    /*
-    ========================================
-    FIND BUS
-    ========================================
-    */
+    if (firebaseBusData.driverId !== driverId) {
+      return res.status(403).json({
+        success: false,
+        message: "This bus is occupied by another driver",
+      });
+    }
 
+    const endedAt = new Date();
+
+    // ✅ Stop selected bus in MongoDB
     const bus = await Bus.findOne({
-      busNumber: driver.CurentJob.busNumber,
+      schoolId,
+      busNumber,
+      "driverlogin.driverId": driverId,
     });
 
     if (bus) {
       bus.driverlogin = {};
-
-      bus.status.tripStarted = false;
-
+      bus.status = {
+        ...(bus.status || {}),
+        tripStarted: false,
+      };
       await bus.save();
     }
 
-    /*
-    ========================================
-    CLEAR DRIVER JOB
-    ========================================
-    */
+    // ✅ Stop selected bus in Firebase
+    await firebaseBusRef.update({
+      isOccupied: false,
+      endedAt: endedAt.toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
 
-    driver.CurentJob = {};
+    // ✅ Clear current job only if current job is this selected bus
+    if (driver.CurentJob?.busNumber === busNumber) {
+      driver.CurentJob = {};
+      await driver.save();
 
-    await driver.save();
+      await db
+        .ref(`driverJobs/${schoolId}/${driverId}`)
+        .update({
+          isJobActive: false,
+          currentBusNumber: null,
+          currentBusAsignNumber: null,
+          endedAt: endedAt.toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+    }
 
     return res.status(200).json({
       success: true,
-      message: "Driver job ended",
+      message: "Selected bus stopped successfully",
+      data: {
+        busNumber,
+        stoppedBy: driverId,
+        endedAt,
+      },
     });
   } catch (err) {
     return res.status(500).json({
       success: false,
+      message: "Stop driver job failed",
       error: err.message,
+    });
+  }
+};
+
+
+// GET SELECTED BUS STATUS
+exports.getDriverBusJobStatus = async (req, res) => {
+  try {
+    const { schoolId, driverId, busNumber } = req.params;
+
+    if (!schoolId || !driverId || !busNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "schoolId, driverId and busNumber are required",
+      });
+    }
+
+    const bus = await Bus.findOne({ schoolId, busNumber })
+      .select("busNumber busAsignNumber driverlogin status");
+
+    if (!bus) {
+      return res.status(404).json({
+        success: false,
+        message: "Bus not found",
+      });
+    }
+
+    const firebaseBusSnap = await db
+      .ref(`busJobs/${schoolId}/${busNumber}`)
+      .once("value");
+
+    const firebaseBusData = firebaseBusSnap.val();
+
+    const firebaseOccupied = firebaseBusData?.isOccupied === true;
+    const mongoOccupied = !!bus.driverlogin?.driverId;
+
+    const occupiedDriverId =
+      firebaseBusData?.driverId || bus.driverlogin?.driverId || null;
+
+    const isOccupied = firebaseOccupied || mongoOccupied;
+    const occupiedByMe = occupiedDriverId === driverId;
+
+    return res.status(200).json({
+      success: true,
+      isOccupied,
+      occupiedByMe,
+      stopRequired: isOccupied && occupiedByMe,
+      message: !isOccupied
+        ? "Bus is free"
+        : occupiedByMe
+        ? "Bus is occupied by you. You can stop this bus."
+        : "Bus is occupied by another driver.",
+      data: {
+        busNumber,
+        busAsignNumber: bus.busAsignNumber,
+        occupiedDriverId,
+        firebase: firebaseBusData || null,
+        mongo: {
+          driverlogin: bus.driverlogin || {},
+          status: bus.status || {},
+        },
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Bus status fetch failed",
+      error: error.message,
     });
   }
 };
