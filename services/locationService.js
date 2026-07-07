@@ -4,8 +4,10 @@ const { runEngines } = require("../engines/runEngines.js");
 
 async function processLocation(data) {
   try {
-    const { schoolId, busNumber, lat, lng } = data;
+    const { schoolId, busNumber,speed,timestamp , lat, lng } = data;
 
+
+console.log("Processing Location:", data.speed);
     /*
     ================================
     SAVE LIVE GPS (REDIS)
@@ -19,6 +21,8 @@ async function processLocation(data) {
         busNumber,
         lat,
         lng,
+        speed,
+        timestamp,
         updatedAt: Date.now(),
       })
     );
@@ -34,6 +38,8 @@ async function processLocation(data) {
       .set({
         lat,
         lng,
+        speed,
+        timestamp,
         updatedAt: Date.now(),
       });
 

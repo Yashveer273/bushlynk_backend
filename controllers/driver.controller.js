@@ -743,18 +743,23 @@ exports.endDriverJob = async (req, res) => {
     const firebaseBusSnap = await firebaseBusRef.once("value");
     const firebaseBusData = firebaseBusSnap.val();
 
-    if (!firebaseBusData || firebaseBusData.isOccupied !== true) {
+    if (!firebaseBusData || firebaseBusData.isOccupied != true) {
+      console.log(firebaseBusData  || firebaseBusData.isOccupied);
       return res.status(400).json({
         success: false,
         message: "This bus is not active",
       });
     }
 
-    if (firebaseBusData.driverId !== driverId) {
+    if (firebaseBusData.driverId != driverId) {
+      console.log(";;;;");
       return res.status(403).json({
         success: false,
-        message: "This bus is occupied by another driver",
+        message: `This bus is occupied by another driver ${firebaseBusData.driverId }-${firebaseBusData.driverName
+}. You cannot stop this bus.`, "occupied_by_driverId":firebaseBusData.driverId,
+      "occupied_by_driverName":firebaseBusData.driverName, 
       });
+     
     }
 
     const endedAt = new Date();
@@ -821,7 +826,7 @@ exports.endDriverJob = async (req, res) => {
 exports.getDriverBusJobStatus = async (req, res) => {
   try {
     const { schoolId, driverId, busNumber } = req.params;
-
+console.log("Fetching bus job status for:", { schoolId, driverId, busNumber });
     if (!schoolId || !driverId || !busNumber) {
       return res.status(400).json({
         success: false,
@@ -869,6 +874,9 @@ exports.getDriverBusJobStatus = async (req, res) => {
         busAsignNumber: bus.busAsignNumber,
         occupiedDriverId,
         firebase: firebaseBusData || null,
+       occupiedDriverName: firebaseBusData?.driverName || null,
+       occupiedDriverPhone: firebaseBusData?.phone
+ || null,
         mongo: {
           driverlogin: bus.driverlogin || {},
           status: bus.status || {},

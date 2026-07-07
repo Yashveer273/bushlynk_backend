@@ -22,7 +22,7 @@ const {
 */
 router.post("/createDriver",auth, createDriver);
 router.get(
-  "/job-status/firebase/:schoolId/:driverId",
+  "/job-status/data/:schoolId/:driverId/:busNumber",
   getDriverBusJobStatus
 );
 /*

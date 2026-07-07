@@ -71,7 +71,7 @@ async function startConsumer() {
             JSON.parse(
               message.value.toString()
             );
-
+console.log("Kafka Message Received:", data);
           /*
           ============================================
           VALIDATION
@@ -82,7 +82,9 @@ async function startConsumer() {
             !data.schoolId ||
             !data.busNumber ||
             data.lat === undefined ||
-            data.lng === undefined
+            data.lng === undefined ||
+            data.speed === undefined ||
+            data.timestamp === undefined 
           ) {
 
             console.log(

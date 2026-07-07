@@ -6,7 +6,8 @@ const { sendToKafka } = require("../kafka/producer");
  * Driver sends batched GPS data
  */
 router.post("/location/batch", async (req, res) => {
-  const { schoolId, busNumber, driverId, locations } = req.body;
+  console.log("::::::::");
+  const { schoolId, busNumber, driverId, locations ,speed,timestamp } = req.body;
 
   /*
   WHY BATCH:
@@ -16,9 +17,11 @@ router.post("/location/batch", async (req, res) => {
 
   for (let loc of locations) {
     sendToKafka({
+      timestamp,
       schoolId,
       busNumber,
       driverId,
+      speed,
       ...loc,
     });
   }
