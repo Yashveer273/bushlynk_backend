@@ -23,46 +23,44 @@ Optimized for:
 - scalable GPS processing
 */
 
-const pickupPointSchema =
-  new mongoose.Schema(
-    {
-      /*
+const pickupPointSchema = new mongoose.Schema(
+  {
+    /*
         Connected school
       */
-      schoolId: {
-        type: String,
-        required: true,
+    schoolId: {
+      type: String,
+      required: true,
+    },
 
-      },
-
-      /*
+    /*
         Connected bus
       */
-      busNumber: {
-        type: String,
-        required: true,
-        index: true,
-      },
+    busNumber: {
+      type: String,
+      required: true,
+      index: true,
+    },
 
-      /*
+    /*
         Default geofence radius
         for all pickup points
 
         Can be overridden later
         if needed.
       */
-      radius: {
-        type: Number,
-        default: 150,
-      },
+    radius: {
+      type: Number,
+      default: 150,
+    },
 
-      /*
+    /*
         Multiple default
         pickup points
       */
-      pickupPoints: [
-        {
-          /*
+    pickupPoints: [
+      {
+        /*
             Unique pickup point ID
 
             Used for:
@@ -71,12 +69,24 @@ const pickupPointSchema =
             - dashboard
             - Kafka workers
           */
-          pickupPointId: {
-            type: String,
-            required: true,
-          },
-
-          /*
+        pickupPointId: {
+          type: String,
+          required: true,
+        },
+        status: {
+          type: String,
+          enum: ["DRAFT", "PUBLISHED"],
+          default: "DRAFT",
+        },
+        // Useful for tracking who created it (Admin vs Driver)
+        createdBy: {
+          type: String,
+          enum: ["ADMIN", "DRIVER"],
+          required: true,
+        },
+        // Optional: Reference to the user who made the change
+        lastModifiedBy: { type: String },
+        /*
             Pickup point name
 
             Example:
@@ -84,12 +94,12 @@ const pickupPointSchema =
             - Temple Chowk
             - Bus Stand
           */
-          name: {
-            type: String,
-            required: true,
-          },
+        name: {
+          type: String,
+          required: true,
+        },
 
-          /*
+        /*
             GEOJSON LOCATION
 
             IMPORTANT:
@@ -106,20 +116,20 @@ const pickupPointSchema =
             - ETA engine
             - Kafka GPS consumers
           */
-          location: {
-            type: {
-              type: String,
-              enum: ["Point"],
-              default: "Point",
-            },
-
-            coordinates: {
-              type: [Number],
-              required: true,
-            },
+        location: {
+          type: {
+            type: String,
+            enum: ["Point"],
+            default: "Point",
           },
 
-          /*
+          coordinates: {
+            type: [Number],
+            required: true,
+          },
+        },
+
+        /*
             Assigned students
 
             Store only IDs.
@@ -134,21 +144,21 @@ const pickupPointSchema =
             Better scalability
             and lower document size.
           */
-          assignedStudents: [
-            {
-              parentId: {
-                type: String,
-                required: true,
-              },
+        assignedStudents: [
+          {
+            parentId: {
+              type: String,
+              required: true,
             },
-          ],
-        },
-      ],
-    },
-    {
-      timestamps: true,
-    }
-  );
+          },
+        ],
+      },
+    ],
+  },
+  {
+    timestamps: true,
+  },
+);
 
 /*
 =====================================
@@ -187,14 +197,10 @@ pickupPointSchema.index({
   - realtime GPS matching
 */
 pickupPointSchema.index({
-  "pickupPoints.location":
-    "2dsphere",
+  "pickupPoints.location": "2dsphere",
 });
 
-module.exports = mongoose.model(
-  "PickupPoint",
-  pickupPointSchema
-);
+module.exports = mongoose.model("PickupPoint", pickupPointSchema);
 
 /*
 =====================================

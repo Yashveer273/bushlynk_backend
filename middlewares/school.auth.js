@@ -127,7 +127,7 @@ exports.driverAuth = async (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
 
-    const driver = await Driver.findOne({ token }).lean();
+    const driver = await Driver.findOne({ token }).select('-loginHistory').lean();
 
     if (!driver) {
       return res.status(401).json({

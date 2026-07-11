@@ -9,8 +9,8 @@ const {
   removePickupPoint,
   addPickupPoint,
   editPickupPoint,
-  changeBusId,
-  removeCompleteBusPickupPoints,
+  changeBusId,updateSinglePickupPointStatus,
+  removeCompleteBusPickupPoints,createPickupPointByDriver,
   getPaginatedBusesWithPickupPoints,admin_getPickupPointsByBus,driver_getPickupPointsByBus,getPickupPointById
 } = require("../controllers/pickupPoint.Controller");
 const { auth,driverAuth } = require("../middlewares/school.auth");
@@ -52,6 +52,8 @@ router.get(
  getPickupPointById
 );
 router.post("/create", auth, createPickupPoint);
+router.post("/Driver_create", driverAuth, createPickupPointByDriver);
+router.post("/change_draft_status", auth, updateSinglePickupPointStatus);
 router.put("/edit", auth, editPickupPoint);
 router.get(
   "/get-buses-paginated",
