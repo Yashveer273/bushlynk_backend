@@ -2,28 +2,23 @@ const router = require("express").Router();
 const { auth } = require("../middlewares/school.auth");
 
 const {
-
-
   sendRegisterOTP,
   verifyRegisterOTP,
   createStudent,
 
- 
-
   sendOTP,
   verifyOTP,
   resendOTP,
-
- 
-deleteChild,
+getStudentIdsByParentPhone,
+  deleteChild,
   updateStudent,
   deleteParent,
-getParentsPagination,
-getChildById,
-getParentById,
-addChild,
+  getParentsPagination,
+  getChildById,
+  getParentById,
+  addChild,
   saveFcmToken,
-
+  logoutDevice
 } = require("../controllers/user.controller");
 
 /*
@@ -50,10 +45,7 @@ FLOW:
 6. Send OTP
 */
 
-router.post(
-  "/send-register-otp",auth,
-  sendRegisterOTP
-);
+router.post("/send-register-otp", auth, sendRegisterOTP);
 
 /*
 ================================================================================
@@ -77,10 +69,7 @@ FLOW:
 4. Allow create student
 */
 
-router.post(
-  "/verify-register-otp",auth,
-  verifyRegisterOTP
-);
+router.post("/verify-register-otp", auth, verifyRegisterOTP);
 
 /*
 ================================================================================
@@ -119,11 +108,12 @@ FLOW:
 4. Save student
 */
 
-router.post(
-  "/create",auth,
-  createStudent
+router.post("/create", auth, createStudent);
+router.get(
+  "/get-students-by-parent-phone/:phone",
+  auth,
+  getStudentIdsByParentPhone,
 );
-
 /*
 ================================================================================
 4. SEND LOGIN OTP
@@ -145,11 +135,7 @@ FLOW:
 4. Send OTP
 */
 
-router.post(
-  "/send-otp",
-    auth,
-  sendOTP
-);
+router.post("/send-otp", auth, sendOTP);
 
 /*
 ================================================================================
@@ -172,10 +158,7 @@ FLOW:
 3. Return student data
 */
 
-router.post(
-  "/verify-otp",auth,
-  verifyOTP
-);
+router.post("/verify-otp", auth, verifyOTP);
 
 /*
 ================================================================================
@@ -198,10 +181,7 @@ FLOW:
 4. Send OTP
 */
 
-router.post(
-  "/resend-otp",auth,
-  resendOTP
-);
+router.post("/resend-otp", auth, resendOTP);
 
 /*
 ================================================================================
@@ -242,15 +222,8 @@ FLOW:
 5. Save updated data
 */
 
-router.put(
-  "/student/update/:parentId",auth,
-  updateStudent
-);
-router.post(
-  "/addChild/:parentId/child",
-  auth,
-  addChild
-);
+router.put("/student/update/:parentId", auth, updateStudent);
+router.post("/addChild/:parentId/child", auth, addChild);
 /*
 ================================================================================
 8. DELETE STUDENT
@@ -267,15 +240,8 @@ FLOW:
 2. Delete student
 */
 
-router.delete(
-  "/student/delete/:parentId/",auth,
-  deleteParent
-);
-router.delete(
-  "/student/delete/:parentId/child/:childId",
-  auth,
-  deleteChild
-);
+router.delete("/student/delete/:parentId/", auth, deleteParent);
+router.delete("/student/delete/:parentId/child/:childId", auth, deleteChild);
 /*
 ================================================================================
 9. SAVE FCM TOKEN
@@ -296,10 +262,7 @@ FLOW:
 3. Enable notifications
 */
 
-router.post(
-  "/save-fcm-token",auth,
-  saveFcmToken
-);
+router.post("/save-fcm-token", auth, saveFcmToken);
 
 /*
 ================================================================================
@@ -307,10 +270,7 @@ router.post(
 ================================================================================
 */
 
-router.get(
-  "/parent/:parentId",auth,
-  getParentById
-);
+router.get("/parent/:parentId", auth, getParentById);
 
 /*
 ================================================================================
@@ -318,10 +278,7 @@ router.get(
 ================================================================================
 */
 
-router.get(
-  "/parents",auth,
-  getParentsPagination
-);
+router.get("/parents", auth, getParentsPagination);
 
 /*
 ================================================================================
@@ -329,9 +286,12 @@ router.get(
 ================================================================================
 */
 
-router.get(
-  "/parent/:parentId/child/:childId",auth,
-  getChildById
-);
+/*
+================================================================================
+13. logoutDevice
+================================================================================
+*/
+router.post("/logoutDevice", auth, logoutDevice);
+router.get("/parent/:parentId/child/:childId", auth, getChildById);
 
 module.exports = router;

@@ -1,5 +1,47 @@
 const mongoose = require("mongoose");
+const DeviceSchema = new mongoose.Schema(
+  {
+    deviceId: {
+      type: String,
+      required: true,
+    },
 
+    fcmToken: {
+      type: String,
+      required: true,
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
+const OtpRequestSchema = new mongoose.Schema(
+  {
+    deviceId: {
+      type: String,
+      required: true,
+    },
+
+    code: {
+      type: String,
+      required: true,
+    },
+
+    expiresAt: {
+      type: Date,
+      required: true,
+    },
+
+    attempts: {
+      type: Number,
+      default: 0,
+    },
+  },
+  {
+    _id: false,
+  }
+);
 const StudentSchema = new mongoose.Schema(
   {
     /*
@@ -95,7 +137,7 @@ const StudentSchema = new mongoose.Schema(
 
         busNumber: {
           type: String,
-          required: true,
+              default: "",
         },
 
         /*
@@ -122,17 +164,13 @@ const StudentSchema = new mongoose.Schema(
     FCM TOKEN
     =========================================
     */
- otp: {
-      code: String,
-      expiresAt: Date,
-      attempts: {
-        type: Number,
-        default: 0,
-      },
-    },
-    fcmToken: {
-      type: String,
-      default: null,
+ otpRequests: {
+  type: [OtpRequestSchema],
+  default: [],
+},
+   devices: {
+      type: [DeviceSchema],
+      default: [],
     },
 
     /*

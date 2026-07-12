@@ -1,6 +1,8 @@
 const PickupPoint = require("../models/PickupPoint");
+const students = require("../models/students");
 const generateId = require("../utils/generateId");
 const redisClient = require("../config/redis");
+const mongoose = require("mongoose");
 
 /*
 =====================================
@@ -391,105 +393,568 @@ exports.createPickupPointByDriver = async (req, res) => {
 =====================================
 */
 
+
 exports.addStudent = async (req, res) => {
   try {
-    const { busNumber, pickupPointId, student } = req.body;
-    const { schoolId } = req.user;
+    const {
+    
+      busNumber,
+      pickupPointId,
+      student,
+    } = req.body;
+   const { schoolId } = req.user;
     /*
-    REQUIRED STRUCTURE
-    student: {
-      parentId,
-      childId,
-      studentId,
-      busNumber
+    EXPECTED REQUEST BODY
+
+    {
+      "schoolId": "YTFTY",
+      "busNumber": "UP15AB123",
+      "pickupPointId": "PP-49PY694I",
+      "student": {
+        "parentId": "4APXHGTI",
+        "studentId": "STU-819252-11"
+      }
     }
+    */
+
+    /*
+    =====================================
+    REQUIRED FIELD VALIDATION
+    =====================================
     */
 
     if (
       !schoolId ||
       !busNumber ||
       !pickupPointId ||
-      !student ||
+    
       !student.parentId ||
-      !student.childId
+      !student.studentId
     ) {
       return res.status(400).json({
         success: false,
+        code: "REQUIRED_FIELDS_MISSING",
+        message:
+          "schoolId, busNumber, pickupPointId, parentId and studentId are required",
+      });
+    }
 
-        message: "Required fields missing",
+    const cleanSchoolId = String(schoolId).trim();
+    const cleanBusNumber = String(busNumber).trim();
+    const cleanPickupPointId = String(pickupPointId).trim();
+    const cleanParentId = String(student.parentId).trim();
+    const cleanStudentId = String(student.studentId).trim();
+
+    if (
+      !cleanSchoolId ||
+      !cleanBusNumber ||
+      !cleanPickupPointId ||
+      !cleanParentId ||
+      !cleanStudentId
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: "EMPTY_FIELD_VALUE",
+        message: "Required fields cannot contain empty values",
       });
     }
 
     /*
     =====================================
-    FIND DOCUMENT
+    FIND TARGET BUS PICKUP DOCUMENT
     =====================================
     */
 
     const pickupDoc = await PickupPoint.findOne({
-      schoolId,
-      busNumber,
+      schoolId: cleanSchoolId,
+      busNumber: cleanBusNumber,
     });
 
     if (!pickupDoc) {
       return res.status(404).json({
         success: false,
-        message: "Pickup document not found",
+        code: "PICKUP_DOCUMENT_NOT_FOUND",
+        message:
+          "No pickup-point document exists for the selected school and bus",
+
+        requestedAssignment: {
+          schoolId: cleanSchoolId,
+          busNumber: cleanBusNumber,
+          pickupPointId: cleanPickupPointId,
+          parentId: cleanParentId,
+          studentId: cleanStudentId,
+        },
       });
     }
 
     /*
     =====================================
-    FIND PICKUP POINT
+    FIND TARGET PICKUP POINT
     =====================================
     */
 
-    const point = pickupDoc.pickupPoints.find(
-      (p) => p.pickupPointId === pickupPointId,
+    const targetPoint = pickupDoc.pickupPoints.find(
+      (point) =>
+        String(point.pickupPointId).trim() === cleanPickupPointId,
     );
 
-    if (!point) {
+    if (!targetPoint) {
       return res.status(404).json({
         success: false,
-        message: "Pickup point not found",
+        code: "PICKUP_POINT_NOT_FOUND",
+        message:
+          "The selected pickup point does not exist on the selected bus",
+
+        requestedAssignment: {
+          schoolId: cleanSchoolId,
+          busNumber: cleanBusNumber,
+          pickupPointId: cleanPickupPointId,
+          parentId: cleanParentId,
+          studentId: cleanStudentId,
+        },
       });
     }
 
     /*
     =====================================
-    PREVENT DUPLICATE CHILD
+    FIND PARENT USING:
+    SCHOOL ID + PARENT ID
     =====================================
     */
 
-    const alreadyExists = point.assignedStudents.some(
-      (s) => s.parentId === student.parentId && s.childId === student.childId,
-    );
-
-    if (alreadyExists) {
-      return res.status(400).json({
-        success: false,
-
-        message: "Child already assigned",
-      });
-    }
-
-    /*
-    =====================================
-    ADD CHILD
-    =====================================
-    */
-
-    point.assignedStudents.push({
-      parentId: student.parentId,
-
-      childId: student.childId,
-
-      studentId: student.studentId,
-
-      busNumber: student.busNumber,
+    const parentDoc = await students.findOne({
+      schoolId: cleanSchoolId,
+      parentId: cleanParentId,
     });
 
+    if (!parentDoc) {
+      return res.status(404).json({
+        success: false,
+        code: "PARENT_NOT_FOUND",
+        message:
+          "Parent was not found using the provided school ID and parent ID",
+
+        requestedAssignment: {
+          schoolId: cleanSchoolId,
+          parentId: cleanParentId,
+          studentId: cleanStudentId,
+          busNumber: cleanBusNumber,
+          pickupPointId: cleanPickupPointId,
+        },
+      });
+    }
+
+    /*
+    =====================================
+    CHECK PARENT STATUS
+    =====================================
+    */
+
+    if (parentDoc.status?.active === false) {
+      return res.status(400).json({
+        success: false,
+        code: "PARENT_INACTIVE",
+        message:
+          "The parent account is inactive and cannot receive a new assignment",
+
+        requestedAssignment: {
+          schoolId: cleanSchoolId,
+          parentId: cleanParentId,
+          studentId: cleanStudentId,
+          busNumber: cleanBusNumber,
+          pickupPointId: cleanPickupPointId,
+        },
+      });
+    }
+
+    /*
+    =====================================
+    FIND STUDENT INSIDE CHILDREN ARRAY
+    =====================================
+    */
+
+    const child = parentDoc.children.find(
+      (item) =>
+        String(item.studentId).trim() === cleanStudentId,
+    );
+
+    if (!child) {
+      return res.status(404).json({
+        success: false,
+        code: "STUDENT_NOT_FOUND",
+        message:
+          "The student was not found inside this parent's children array",
+
+        requestedAssignment: {
+          schoolId: cleanSchoolId,
+          parentId: cleanParentId,
+          studentId: cleanStudentId,
+          busNumber: cleanBusNumber,
+          pickupPointId: cleanPickupPointId,
+        },
+      });
+    }
+
+    /*
+    =====================================
+    CHECK STUDENT STATUS
+    =====================================
+    */
+
+    if (child.status?.active === false) {
+      return res.status(400).json({
+        success: false,
+        code: "STUDENT_INACTIVE",
+        message:
+          "The student is inactive and cannot be assigned to a pickup point",
+
+        requestedAssignment: {
+          schoolId: cleanSchoolId,
+          parentId: cleanParentId,
+          studentId: cleanStudentId,
+          busNumber: cleanBusNumber,
+          pickupPointId: cleanPickupPointId,
+        },
+      });
+    }
+
+    /*
+    =====================================
+    CHECK STUDENT ACROSS ALL BUSES
+    AND ALL PICKUP POINTS OF THE SCHOOL
+
+    This identifies:
+
+    1. Same bus and same pickup point
+    2. Same bus and different pickup point
+    3. Different bus and pickup point
+    =====================================
+    */
+
+    const existingPickupDocument = await PickupPoint.findOne({
+      schoolId: cleanSchoolId,
+
+      pickupPoints: {
+        $elemMatch: {
+          assignedStudents: {
+            $elemMatch: {
+              parentId: cleanParentId,
+              studentId: cleanStudentId,
+            },
+          },
+        },
+      },
+    });
+
+    if (existingPickupDocument) {
+      const existingPoint =
+        existingPickupDocument.pickupPoints.find((point) =>
+          point.assignedStudents.some(
+            (assignedStudent) =>
+              String(assignedStudent.parentId).trim() ===
+                cleanParentId &&
+              String(assignedStudent.studentId).trim() ===
+                cleanStudentId,
+          ),
+        );
+
+      if (existingPoint) {
+        const existingBusNumber = String(
+          existingPickupDocument.busNumber,
+        ).trim();
+
+        const existingPickupPointId = String(
+          existingPoint.pickupPointId,
+        ).trim();
+
+        const sameBus =
+          existingBusNumber === cleanBusNumber;
+
+        const samePickupPoint =
+          existingPickupPointId === cleanPickupPointId;
+
+        /*
+        =====================================
+        SAME BUS + SAME PICKUP POINT
+        =====================================
+        */
+
+        if (sameBus && samePickupPoint) {
+          return res.status(409).json({
+            success: false,
+            code: "STUDENT_ALREADY_ASSIGNED_SAME_POINT",
+            conflictType: "SAME_BUS_SAME_PICKUP_POINT",
+
+            message:
+              "This student is already assigned to this pickup point",
+
+            existingAssignment: {
+              schoolId: cleanSchoolId,
+              parentId: cleanParentId,
+              studentId: cleanStudentId,
+              busNumber: existingBusNumber,
+              pickupPointId: existingPickupPointId,
+              pickupPointName: existingPoint.name || null,
+            },
+
+            requestedAssignment: {
+              schoolId: cleanSchoolId,
+              parentId: cleanParentId,
+              studentId: cleanStudentId,
+              busNumber: cleanBusNumber,
+              pickupPointId: cleanPickupPointId,
+              pickupPointName: targetPoint.name || null,
+            },
+
+            adminAction:
+              "The student is already assigned here, so no new assignment is required.",
+          });
+        }
+
+        /*
+        =====================================
+        SAME BUS + DIFFERENT PICKUP POINT
+        =====================================
+        */
+
+        if (sameBus && !samePickupPoint) {
+          return res.status(409).json({
+            success: false,
+            code: "STUDENT_ASSIGNED_OTHER_POINT_SAME_BUS",
+            conflictType: "SAME_BUS_DIFFERENT_PICKUP_POINT",
+
+            message:
+              "This student is already assigned to another pickup point on the same bus",
+
+            existingAssignment: {
+              schoolId: cleanSchoolId,
+              parentId: cleanParentId,
+              studentId: cleanStudentId,
+              busNumber: existingBusNumber,
+              pickupPointId: existingPickupPointId,
+              pickupPointName: existingPoint.name || null,
+            },
+
+            requestedAssignment: {
+              schoolId: cleanSchoolId,
+              parentId: cleanParentId,
+              studentId: cleanStudentId,
+              busNumber: cleanBusNumber,
+              pickupPointId: cleanPickupPointId,
+              pickupPointName: targetPoint.name || null,
+            },
+
+            adminAction:
+              "Remove the student from the existing pickup point and then submit the new assignment again.",
+          });
+        }
+
+        /*
+        =====================================
+        DIFFERENT BUS
+        =====================================
+        */
+
+        if (!sameBus) {
+          return res.status(409).json({
+            success: false,
+            code: "STUDENT_ASSIGNED_OTHER_BUS",
+            conflictType: "DIFFERENT_BUS",
+
+            message:
+              "This student is already assigned to another bus and pickup point",
+
+            existingAssignment: {
+              schoolId: cleanSchoolId,
+              parentId: cleanParentId,
+              studentId: cleanStudentId,
+              busNumber: existingBusNumber,
+              pickupPointId: existingPickupPointId,
+              pickupPointName: existingPoint.name || null,
+            },
+
+            requestedAssignment: {
+              schoolId: cleanSchoolId,
+              parentId: cleanParentId,
+              studentId: cleanStudentId,
+              busNumber: cleanBusNumber,
+              pickupPointId: cleanPickupPointId,
+              pickupPointName: targetPoint.name || null,
+            },
+
+            adminAction:
+              "Remove the student from the existing bus and pickup point before adding the new assignment.",
+          });
+        }
+      }
+    }
+
+    /*
+    =====================================
+    CHECK CHILD ARRAY ASSIGNMENT
+
+    This catches inconsistent data where
+    busNumber or pickupPointId exists inside
+    the child record, but the student is not
+    present in the PickupPoint document.
+    =====================================
+    */
+
+    const existingChildBusNumber = child.busNumber
+      ? String(child.busNumber).trim()
+      : "";
+
+    const existingChildPickupPointId = child.pickupPointId
+      ? String(child.pickupPointId).trim()
+      : "";
+
+    const childHasAssignment =
+      Boolean(existingChildBusNumber) ||
+      Boolean(existingChildPickupPointId);
+
+    if (childHasAssignment) {
+      const sameChildBus =
+        existingChildBusNumber === cleanBusNumber;
+
+      const sameChildPickupPoint =
+        existingChildPickupPointId === cleanPickupPointId;
+
+      /*
+      =====================================
+      CHILD HAS SAME ASSIGNMENT BUT
+      PICKUP DOCUMENT DOES NOT
+      =====================================
+      */
+
+      if (sameChildBus && sameChildPickupPoint) {
+        return res.status(409).json({
+          success: false,
+          code: "CHILD_RECORD_HAS_SAME_ASSIGNMENT",
+          conflictType: "INCONSISTENT_SAME_ASSIGNMENT",
+
+          message:
+            "The child record contains this bus and pickup point, but the pickup-point record does not contain the student",
+
+          existingAssignment: {
+            schoolId: cleanSchoolId,
+            parentId: cleanParentId,
+            studentId: cleanStudentId,
+            busNumber: existingChildBusNumber || null,
+            pickupPointId:
+              existingChildPickupPointId || null,
+            source: "CHILD_RECORD",
+          },
+
+          requestedAssignment: {
+            schoolId: cleanSchoolId,
+            parentId: cleanParentId,
+            studentId: cleanStudentId,
+            busNumber: cleanBusNumber,
+            pickupPointId: cleanPickupPointId,
+            pickupPointName: targetPoint.name || null,
+          },
+
+          adminAction:
+            "Check and repair the child assignment before adding the student again.",
+        });
+      }
+
+      /*
+      =====================================
+      CHILD HAS ANOTHER ASSIGNMENT
+      =====================================
+      */
+
+      return res.status(409).json({
+        success: false,
+        code: "CHILD_RECORD_HAS_OTHER_ASSIGNMENT",
+        conflictType: "CHILD_RECORD_DIFFERENT_ASSIGNMENT",
+
+        message:
+          "The child record already contains another bus or pickup point assignment",
+
+        existingAssignment: {
+          schoolId: cleanSchoolId,
+          parentId: cleanParentId,
+          studentId: cleanStudentId,
+          busNumber: existingChildBusNumber || null,
+          pickupPointId:
+            existingChildPickupPointId || null,
+          source: "CHILD_RECORD",
+        },
+
+        requestedAssignment: {
+          schoolId: cleanSchoolId,
+          parentId: cleanParentId,
+          studentId: cleanStudentId,
+          busNumber: cleanBusNumber,
+          pickupPointId: cleanPickupPointId,
+          pickupPointName: targetPoint.name || null,
+        },
+
+        adminAction:
+          "Remove the previous bus and pickup-point assignment before adding the new assignment.",
+      });
+    }
+
+    /*
+    =====================================
+    ALL VALIDATIONS COMPLETED
+
+    NOW ADD STUDENT TO PICKUP POINT
+    =====================================
+    */
+
+    targetPoint.assignedStudents.push({
+      parentId: cleanParentId,
+      studentId: cleanStudentId,
+      busNumber: cleanBusNumber,
+    });
+
+    /*
+    =====================================
+    UPDATE CHILD ARRAY
+    =====================================
+    */
+
+    child.busNumber = cleanBusNumber;
+    child.pickupPointId = cleanPickupPointId;
+
+    /*
+    =====================================
+    SAVE PICKUP DOCUMENT
+    =====================================
+    */
+
     await pickupDoc.save();
+
+    /*
+    =====================================
+    SAVE PARENT DOCUMENT
+
+    If parent save fails, remove the newly
+    added pickup-point assignment.
+    =====================================
+    */
+
+    try {
+      await parentDoc.save();
+    } catch (parentSaveError) {
+      targetPoint.assignedStudents =
+        targetPoint.assignedStudents.filter(
+          (assignedStudent) =>
+            !(
+              String(assignedStudent.parentId).trim() ===
+                cleanParentId &&
+              String(assignedStudent.studentId).trim() ===
+                cleanStudentId
+            ),
+        );
+
+      await pickupDoc.save();
+
+      throw parentSaveError;
+    }
 
     /*
     =====================================
@@ -497,27 +962,59 @@ exports.addStudent = async (req, res) => {
     =====================================
     */
 
-    const redisKey = `pickup_points:${schoolId}:${busNumber}`;
+    const redisKey =
+      `pickup_points:${cleanSchoolId}:${cleanBusNumber}`;
 
-    await redisClient.set(
-      redisKey,
+    try {
+      await redisClient.set(
+        redisKey,
+        JSON.stringify(pickupDoc.pickupPoints),
+      );
+    } catch (redisError) {
+      console.error(
+        "Redis synchronization failed:",
+        redisError,
+      );
+    }
 
-      JSON.stringify(pickupDoc.pickupPoints),
-    );
+    /*
+    =====================================
+    SUCCESS RESPONSE
+    =====================================
+    */
 
     return res.status(200).json({
       success: true,
+      code: "STUDENT_ASSIGNED_SUCCESSFULLY",
+      message:
+        "Student assigned to pickup point successfully",
 
-      message: "Student added successfully",
-
-      data: pickupDoc,
+      assignment: {
+        schoolId: cleanSchoolId,
+        parentId: cleanParentId,
+        studentId: cleanStudentId,
+        busNumber: cleanBusNumber,
+        pickupPointId: cleanPickupPointId,
+        pickupPointName: targetPoint.name || null,
+      },
     });
   } catch (error) {
-    console.log(error);
+    console.error("Add student error:", error);
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        code: "DATABASE_VALIDATION_FAILED",
+        message: "Database validation failed",
+        error: error.message,
+      });
+    }
 
     return res.status(500).json({
       success: false,
-      message: "Server error",
+      code: "ADD_STUDENT_SERVER_ERROR",
+      message: "Server error while assigning student",
+      error: error.message,
     });
   }
 };
@@ -1435,6 +1932,7 @@ exports.driver_getPickupPointsByBus = async (req, res) => {
       data: {
         busNumber: pickupDoc.busNumber,
         pickupPoints,
+       radius: pickupDoc.radius
       },
       pagination,
     });

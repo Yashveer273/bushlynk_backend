@@ -145,13 +145,26 @@ const pickupPointSchema = new mongoose.Schema(
             and lower document size.
           */
         assignedStudents: [
-          {
-            parentId: {
-              type: String,
-              required: true,
-            },
-          },
-        ],
+  {
+    parentId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    studentId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    busNumber: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+  },
+],
       },
     ],
   },
