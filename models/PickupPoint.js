@@ -39,7 +39,7 @@ const pickupPointSchema = new mongoose.Schema(
     busNumber: {
       type: String,
       required: true,
-      index: true,
+
     },
 
     /*
@@ -182,21 +182,16 @@ INDEXES
 /*
   Fast school lookup
 */
-pickupPointSchema.index({
-  schoolId: 1,
-});
-
-/*
-  Fast bus lookup
-
-  Important for:
-  - realtime tracking
-  - Redis sync
-  - Kafka consumers
-*/
-pickupPointSchema.index({
-  busNumber: 1,
-});
+pickupPointSchema.index(
+  {
+    schoolId: 1,
+    busNumber: 1,
+  },
+  {
+    unique: true,
+    name: "unique_school_bus_pickup_document",
+  },
+);
 
 /*
   GEO INDEX
@@ -209,10 +204,29 @@ pickupPointSchema.index({
   - ETA calculation
   - realtime GPS matching
 */
-pickupPointSchema.index({
-  "pickupPoints.location": "2dsphere",
-});
+pickupPointSchema.index(
+  {
+    "pickupPoints.location": "2dsphere",
+  },
+  {
+    name: "pickup_points_geo_index",
+  },
+);
+/*
+  NEW:
 
+  Faster lookup when updating or deleting
+  one pickup point inside a school.
+*/
+pickupPointSchema.index(
+  {
+    schoolId: 1,
+    "pickupPoints.pickupPointId": 1,
+  },
+  {
+    name: "school_pickup_point_id_lookup",
+  },
+);
 module.exports = mongoose.model("PickupPoint", pickupPointSchema);
 
 /*

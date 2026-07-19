@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pickup Point API Tester</title>
+
+  <style>
+    :root {
+      --bg: #08101f;
+      --sidebar: #0d1628;
+      --panel: #111b30;
+      --panel-2: #17233d;
+      --border: #263654;
+      --text: #edf4ff;
+      --muted: #92a3c7;
+      --blue: #5d8cff;
+      --blue-2: #3d6cf4;
+      --green: #2dd48f;
+      --red: #ff6b7d;
+      --yellow: #ffc857;
+      --input: #0b1426;
+      --shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, Arial, sans-serif;
+      background:
+        radial-gradient(circle at top right, rgba(93, 140, 255, 0.15), transparent 28%),
+        var(--bg);
+      color: var(--text);
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      padding: 20px 14px;
+      overflow-y: auto;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .brand {
+      padding: 0 8px 18px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 21px;
+    }
+
+    .brand p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .menu-section {
+      margin-bottom: 20px;
+    }
+
+    .menu-title {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.9px;
+      padding: 0 8px 8px;
+    }
+
+    .api-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .api-item {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text);
+      border-radius: 11px;
+      padding: 11px 12px;
+      text-align: left;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .api-item:hover {
+      background: var(--panel-2);
+      border-color: var(--border);
+    }
+
+    .api-item.active {
+      background: rgba(93, 140, 255, 0.16);
+      border-color: rgba(93, 140, 255, 0.55);
+    }
+
+    .api-item-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+
+    .api-method {
+      min-width: 50px;
+      font-size: 10px;
+      font-weight: 900;
+      border-radius: 6px;
+      padding: 4px 6px;
+      text-align: center;
+    }
+
+    .get { background: rgba(45, 212, 143, 0.14); color: var(--green); }
+    .post { background: rgba(93, 140, 255, 0.16); color: #8fb0ff; }
+    .put { background: rgba(255, 200, 87, 0.14); color: var(--yellow); }
+    .delete { background: rgba(255, 107, 125, 0.14); color: var(--red); }
+
+    .api-name {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .api-path-small {
+      color: var(--muted);
+      font-size: 10px;
+      word-break: break-all;
+      line-height: 1.4;
+    }
+
+    .main {
+      padding: 22px;
+      overflow-x: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .topbar h2 {
+      margin: 0;
+      font-size: 25px;
+    }
+
+    .topbar p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .save-btn,
+    .send-btn,
+    .soft-btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 11px 15px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .save-btn,
+    .soft-btn {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .send-btn {
+      background: linear-gradient(135deg, var(--blue), var(--blue-2));
+      color: white;
+      min-width: 110px;
+    }
+
+    .send-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .settings-card,
+    .request-card,
+    .response-card {
+      background: rgba(17, 27, 48, 0.97);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+
+    .card-head {
+      padding: 15px 17px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .card-head h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .card-body {
+      padding: 17px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 13px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .field {
+      margin-bottom: 13px;
+    }
+
+    label {
+      display: block;
+      color: #c9d5ef;
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 7px;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: var(--input);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 11px 12px;
+      outline: none;
+      font: inherit;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(93, 140, 255, 0.12);
+    }
+
+    textarea {
+      min-height: 245px;
+      resize: vertical;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .request-line {
+      display: grid;
+      grid-template-columns: 110px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .method-select {
+      font-weight: 900;
+    }
+
+    .seed-note {
+      margin-top: 10px;
+      background: rgba(93, 140, 255, 0.08);
+      border: 1px dashed rgba(93, 140, 255, 0.35);
+      color: var(--muted);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 13px;
+    }
+
+    .stat {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 11px;
+    }
+
+    .stat small {
+      color: var(--muted);
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .stat strong {
+      font-size: 15px;
+      word-break: break-word;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 11px;
+    }
+
+    .tab {
+      background: var(--panel-2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 8px 11px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .tab.active {
+      color: white;
+      border-color: var(--blue);
+      background: rgba(93, 140, 255, 0.16);
+    }
+
+    pre {
+      margin: 0;
+      background: #07101e;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 15px;
+      min-height: 360px;
+      max-height: 600px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, Monaco, monospace;
+      line-height: 1.55;
+      font-size: 13px;
+    }
+
+    .hidden { display: none; }
+    .ok { color: var(--green); }
+    .bad { color: var(--red); }
+    .warn { color: var(--yellow); }
+
+    @media (max-width: 1100px) {
+      .app-shell {
+        grid-template-columns: 250px 1fr;
+      }
+
+      .grid-4 {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 800px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: relative;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .api-menu {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .grid-2,
+      .grid-4 {
+        grid-template-columns: 1fr;
+      }
+
+      .request-line {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .main {
+        padding: 14px;
+      }
+
+      .api-menu {
+        grid-template-columns: 1fr;
+      }
+
+      .stats {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .topbar {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>Pickup APIs</h1>
+        <p>Select any API. Its method, route, auth type, query and seed body will fill automatically.</p>
+      </div>
+
+      <div id="apiMenuContainer"></div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h2 id="selectedApiTitle">API Tester</h2>
+          <p id="selectedApiDescription">Select an API from the left menu.</p>
+        </div>
+
+        <button id="saveSettingsBtn" class="save-btn">Save Base URL & Token</button>
+      </div>
+
+      <section class="settings-card">
+        <div class="card-head">
+          <h3>Common Settings</h3>
+          <span id="saveState" class="warn">Not saved</span>
+        </div>
+
+        <div class="card-body">
+          <div class="grid-2">
+            <div class="field">
+              <label for="baseUrl">Base URL</label>
+              <input
+                id="baseUrl"
+                value="http://192.168.1.7:3000/api/pickupPoint"
+              />
+            </div>
+
+            <div class="field">
+              <label for="authType">Authentication</label>
+              <select id="authType">
+                <option value="admin">Admin Token</option>
+                <option value="driver">Driver Token</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="token">Token</label>
+            <input
+              id="token"
+              type="password"
+              placeholder="Paste token without Bearer"
+            />
+          </div>
+
+          <div class="grid-4">
+            <div class="field">
+              <label for="busNumber">Bus Number</label>
+              <input id="busNumber" value="UP15AB123" />
+            </div>
+
+            <div class="field">
+              <label for="pickupPointId">Pickup Point ID</label>
+              <input id="pickupPointId" value="PP-49PY694I" />
+            </div>
+
+            <div class="field">
+              <label for="parentId">Parent ID</label>
+              <input id="parentId" value="X285Q7R5" />
+            </div>
+
+            <div class="field">
+              <label for="studentId">Student ID</label>
+              <input id="studentId" value="STU-623640-31" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="request-card">
+        <div class="card-head">
+          <h3>Editable Request</h3>
+          <span id="requestState" class="warn">Ready</span>
+        </div>
+
+        <div class="card-body">
+          <div class="request-line">
+            <select id="method" class="method-select">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>DELETE</option>
+            </select>
+
+            <input id="path" />
+
+            <button id="sendBtn" class="send-btn">Send API</button>
+          </div>
+
+          <div class="field">
+            <label for="requestBody">Seed Body — Editable</label>
+            <textarea id="requestBody" spellcheck="false">{}</textarea>
+          </div>
+
+          <div class="actions">
+            <button id="reloadSeedBtn" class="soft-btn">Reload Seed Data</button>
+            <button id="formatBtn" class="soft-btn">Format JSON</button>
+            <button id="copyCurlBtn" class="soft-btn">Copy cURL</button>
+            <button id="clearResponseBtn" class="soft-btn">Clear Response</button>
+          </div>
+
+          <div class="seed-note">
+            Selecting another API from the left menu automatically fills fresh seed data.
+            You can edit the path, method or JSON before sending.
+          </div>
+        </div>
+      </section>
+
+      <section class="response-card">
+        <div class="card-head">
+          <h3>Response</h3>
+          <span id="responseState" class="warn">No request sent</span>
+        </div>
+
+        <div class="card-body">
+          <div class="stats">
+            <div class="stat">
+              <small>Status</small>
+              <strong id="statusValue">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>Total Time</small>
+              <strong id="totalTimeValue">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>Database Time</small>
+              <strong id="databaseTimeValue">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>API Time</small>
+              <strong id="apiTimeValue">-</strong>
+            </div>
+          </div>
+
+          <div class="tabs">
+            <button class="tab active" data-tab="response">Response</button>
+            <button class="tab" data-tab="headers">Headers</button>
+            <button class="tab" data-tab="curl">cURL</button>
+          </div>
+
+          <pre id="responseOutput">{}</pre>
+          <pre id="headersOutput" class="hidden">{}</pre>
+          <pre id="curlOutput" class="hidden"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const apiGroups = [
+      {
+        title: "Driver APIs",
+        items: [
+          {
+            id: "driver-get-points",
+            name: "Get pickup points",
+            description: "Get bus pickup points with assigned parent and student details.",
+            auth: "driver",
+            method: "GET",
+            path: ({ busNumber }) =>
+              `/driver_get-pickup-points/${encodeURIComponent(busNumber)}`,
+            body: () => null,
+          },
+          {
+            id: "driver-create-point",
+            name: "Create pickup point",
+            description: "Create a new draft pickup point from the driver account.",
+            auth: "driver",
+            method: "POST",
+            path: () => "/Driver_create",
+            body: ({ busNumber }) => ({
+              busNumber,
+              pickupPoints: [
+                {
+                  name: "Driver Pickup Point",
+                  radius: 100,
+                  location: {
+                    type: "Point",
+                    coordinates: [77.841141, 27.937927],
+                  },
+                  assignedStudents: [],
+                },
+              ],
+            }),
+          },
+        ],
+      },
+      {
+        title: "Admin GET APIs",
+        items: [
+          {
+            id: "admin-get-buses",
+            name: "Get buses paginated",
+            description: "Get buses with limited pickup point preview.",
+            auth: "admin",
+            method: "GET",
+            path: () =>
+              "/get-buses-paginated?page=1&limit=5&pickupPointLimit=5",
+            body: () => null,
+          },
+          {
+            id: "admin-get-points",
+            name: "Get points by bus",
+            description: "Get paginated pickup points under a selected bus.",
+            auth: "admin",
+            method: "GET",
+            path: ({ busNumber }) =>
+              `/get-pickup-points/${encodeURIComponent(busNumber)}?page=1&limit=5`,
+            body: () => null,
+          },
+          {
+            id: "admin-get-point-id",
+            name: "Get pickup point by ID",
+            description: "Get one embedded pickup point using pickupPointId.",
+            auth: "admin",
+            method: "GET",
+            path: ({ pickupPointId }) =>
+              `/pickup-points/${encodeURIComponent(pickupPointId)}`,
+            body: () => null,
+          },
+        ],
+      },
+      {
+        title: "Admin Create / Update",
+        items: [
+          {
+            id: "admin-create",
+            name: "Create pickup point",
+            description: "Create or add published pickup points for a bus.",
+            auth: "admin",
+            method: "POST",
+            path: () => "/create",
+            body: ({ busNumber }) => ({
+              busNumber,
+              pickupPoints: [
+                {
+                  name: "Main Gate",
+                  radius: 100,
+                  location: {
+                    type: "Point",
+                    coordinates: [77.841141, 27.937927],
+                  },
+                  assignedStudents: [],
+                },
+              ],
+            }),
+          },
+          {
+            id: "admin-add-point",
+            name: "Add additional point",
+            description: "Add another pickup point to an existing bus.",
+            auth: "admin",
+            method: "POST",
+            path: () => "/add-pickup-point",
+            body: ({ busNumber }) => ({
+              busNumber,
+              pickupPoints: [
+                {
+                  name: "Additional Pickup Point",
+                  radius: 100,
+                  location: {
+                    type: "Point",
+                    coordinates: [77.841141, 27.937927],
+                  },
+                  assignedStudents: [],
+                },
+              ],
+            }),
+          },
+          {
+            id: "admin-status",
+            name: "Change draft status",
+            description: "Publish or move a pickup point back to draft.",
+            auth: "admin",
+            method: "POST",
+            path: () => "/change_draft_status",
+            body: ({ busNumber, pickupPointId }) => ({
+              busNumber,
+              pickupPointId,
+              status: "PUBLISHED",
+            }),
+          },
+          {
+            id: "admin-edit",
+            name: "Edit pickup point",
+            description: "Update name, radius or location.",
+            auth: "admin",
+            method: "PUT",
+            path: () => "/edit",
+            body: ({ busNumber, pickupPointId }) => ({
+              busNumber,
+              pickupPointId,
+              name: "Updated Pickup Point",
+              radius: 150,
+              location: {
+                type: "Point",
+                coordinates: [77.841141, 27.937927],
+              },
+            }),
+          },
+          {
+            id: "admin-change-bus",
+            name: "Change bus ID",
+            description: "Change old bus number to a new bus number.",
+            auth: "admin",
+            method: "PUT",
+            path: () => "/change-bus-id",
+            body: ({ busNumber }) => ({
+              oldBusNumber: busNumber,
+              newBusNumber: "UP15AB124",
+            }),
+          },
+        ],
+      },
+      {
+        title: "Student Assignment",
+        items: [
+          {
+            id: "admin-add-student",
+            name: "Add student",
+            description: "Assign a referenced parent and child to a pickup point.",
+            auth: "admin",
+            method: "POST",
+            path: () => "/add-student",
+            body: ({ busNumber, pickupPointId, parentId, studentId }) => ({
+              busNumber,
+              pickupPointId,
+              student: {
+                parentId,
+                studentId,
+              },
+            }),
+          },
+          {
+            id: "admin-remove-student",
+            name: "Remove student",
+            description: "Remove student assignment and clear child assignment.",
+            auth: "admin",
+            method: "POST",
+            path: () => "/remove-student",
+            body: ({ busNumber, pickupPointId, parentId, studentId }) => ({
+              busNumber,
+              pickupPointId,
+              parentId,
+              studentId,
+            }),
+          },
+        ],
+      },
+      {
+        title: "Delete APIs",
+        items: [
+          {
+            id: "admin-remove-point",
+            name: "Remove pickup point",
+            description: "Delete one pickup point from the bus document.",
+            auth: "admin",
+            method: "DELETE",
+            path: () => "/remove-pickup-point",
+            body: ({ busNumber, pickupPointId }) => ({
+              busNumber,
+              pickupPointId,
+            }),
+          },
+          {
+            id: "admin-remove-bus",
+            name: "Remove complete bus",
+            description: "Delete the complete pickup document for one bus.",
+            auth: "admin",
+            method: "DELETE",
+            path: () => "/remove-complete-bus-pickup-points",
+            body: ({ busNumber }) => ({
+              busNumber,
+            }),
+          },
+        ],
+      },
+    ];
+
+    const allApis = apiGroups.flatMap((group) => group.items);
+    let selectedApi = allApis[0];
+
+    const $ = (id) => document.getElementById(id);
+
+    function currentSeedValues() {
+      return {
+        busNumber: $("busNumber").value.trim(),
+        pickupPointId: $("pickupPointId").value.trim(),
+        parentId: $("parentId").value.trim(),
+        studentId: $("studentId").value.trim(),
+      };
+    }
+
+    function methodClass(method) {
+      return method.toLowerCase();
+    }
+
+    function buildMenu() {
+      const container = $("apiMenuContainer");
+      container.innerHTML = "";
+
+      apiGroups.forEach((group) => {
+        const section = document.createElement("section");
+        section.className = "menu-section";
+
+        const title = document.createElement("div");
+        title.className = "menu-title";
+        title.textContent = group.title;
+
+        const menu = document.createElement("div");
+        menu.className = "api-menu";
+
+        group.items.forEach((api) => {
+          const button = document.createElement("button");
+          button.className = "api-item";
+          button.dataset.apiId = api.id;
+
+          button.innerHTML = `
+            <div class="api-item-top">
+              <span class="api-method ${methodClass(api.method)}">${api.method}</span>
+              <span class="api-name">${api.name}</span>
+            </div>
+            <div class="api-path-small">${api.path(currentSeedValues())}</div>
+          `;
+
+          button.addEventListener("click", () => {
+            selectApi(api.id);
+          });
+
+          menu.appendChild(button);
+        });
+
+        section.appendChild(title);
+        section.appendChild(menu);
+        container.appendChild(section);
+      });
+    }
+
+    function selectApi(apiId) {
+      selectedApi = allApis.find((api) => api.id === apiId) || allApis[0];
+
+      document.querySelectorAll(".api-item").forEach((item) => {
+        item.classList.toggle(
+          "active",
+          item.dataset.apiId === selectedApi.id,
+        );
+      });
+
+      loadSelectedApiSeed();
+    }
+
+    function loadSelectedApiSeed() {
+      const values = currentSeedValues();
+
+      $("selectedApiTitle").textContent =
+        `${selectedApi.method} — ${selectedApi.name}`;
+      $("selectedApiDescription").textContent =
+        selectedApi.description;
+
+      $("authType").value = selectedApi.auth;
+      $("method").value = selectedApi.method;
+      $("path").value = selectedApi.path(values);
+
+      const body = selectedApi.body(values);
+      $("requestBody").value = body
+        ? JSON.stringify(body, null, 2)
+        : "{}";
+
+      updateCurlPreview();
+      refreshMenuPaths();
+    }
+
+    function refreshMenuPaths() {
+      document.querySelectorAll(".api-item").forEach((item) => {
+        const api = allApis.find((entry) => entry.id === item.dataset.apiId);
+        const pathNode = item.querySelector(".api-path-small");
+
+        if (api && pathNode) {
+          pathNode.textContent = api.path(currentSeedValues());
+        }
+      });
+    }
+
+    function normalizeBaseUrl(url) {
+      return url.trim().replace(/\/+$/, "");
+    }
+
+    function parseRequestBody() {
+      const raw = $("requestBody").value.trim();
+
+      if (!raw || raw === "{}") {
+        return null;
+      }
+
+      return JSON.parse(raw);
+    }
+
+    function buildCurl() {
+      const baseUrl = normalizeBaseUrl($("baseUrl").value);
+      const path = $("path").value.startsWith("/")
+        ? $("path").value
+        : `/${$("path").value}`;
+
+      const token = $("token").value.trim() || "<TOKEN>";
+      const method = $("method").value;
+
+      let curl =
+        `curl -X ${method} "${baseUrl}${path}"` +
+        ` \\\n  -H "Authorization: Bearer ${token}"` +
+        ` \\\n  -H "Accept: application/json"`;
+
+      try {
+        const body = parseRequestBody();
+
+        if (body && method !== "GET") {
+          curl +=
+            ` \\\n  -H "Content-Type: application/json"` +
+            ` \\\n  -d '${JSON.stringify(body).replace(/'/g, "'\\''")}'`;
+        }
+      } catch (_) {}
+
+      return curl;
+    }
+
+    function updateCurlPreview() {
+      $("curlOutput").textContent = buildCurl();
+    }
+
+    function saveSettings() {
+      const settings = {
+        baseUrl: $("baseUrl").value,
+        token: $("token").value,
+        busNumber: $("busNumber").value,
+        pickupPointId: $("pickupPointId").value,
+        parentId: $("parentId").value,
+        studentId: $("studentId").value,
+      };
+
+      localStorage.setItem(
+        "pickupPointApiTesterSettingsV2",
+        JSON.stringify(settings),
+      );
+
+      $("saveState").textContent = "Saved";
+      $("saveState").className = "ok";
+    }
+
+    function loadSettings() {
+      try {
+        const settings = JSON.parse(
+          localStorage.getItem("pickupPointApiTesterSettingsV2") || "{}",
+        );
+
+        Object.entries(settings).forEach(([key, value]) => {
+          if ($(key) && value !== undefined) {
+            $(key).value = value;
+          }
+        });
+      } catch (_) {}
+    }
+
+    async function sendRequest() {
+      const baseUrl = normalizeBaseUrl($("baseUrl").value);
+      const token = $("token").value.trim();
+      const method = $("method").value;
+      const path = $("path").value.startsWith("/")
+        ? $("path").value
+        : `/${$("path").value}`;
+
+      if (!baseUrl) {
+        alert("Base URL is required");
+        return;
+      }
+
+      if (!token) {
+        alert("Token is required");
+        return;
+      }
+
+      let body = null;
+
+      try {
+        body = parseRequestBody();
+      } catch (error) {
+        alert(`Invalid JSON body: ${error.message}`);
+        return;
+      }
+
+      const options = {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      };
+
+      if (body && method !== "GET") {
+        options.headers["Content-Type"] = "application/json";
+        options.body = JSON.stringify(body);
+      }
+
+      $("sendBtn").disabled = true;
+      $("requestState").textContent = "Sending...";
+      $("requestState").className = "warn";
+      $("responseState").textContent = "Waiting...";
+      $("responseState").className = "warn";
+
+      const start = performance.now();
+
+      try {
+        const response = await fetch(`${baseUrl}${path}`, options);
+        const responseText = await response.text();
+        const elapsed = performance.now() - start;
+
+        let parsed;
+
+        try {
+          parsed = JSON.parse(responseText);
+        } catch (_) {
+          parsed = responseText;
+        }
+
+        const headers = {};
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+
+        $("statusValue").textContent =
+          `${response.status} ${response.statusText}`;
+        $("statusValue").className = response.ok ? "ok" : "bad";
+
+        $("totalTimeValue").textContent = `${elapsed.toFixed(2)} ms`;
+        $("databaseTimeValue").textContent =
+          response.headers.get("x-database-time") || "-";
+        $("apiTimeValue").textContent =
+          response.headers.get("x-api-time") || "-";
+
+        $("responseOutput").textContent =
+          typeof parsed === "string"
+            ? parsed
+            : JSON.stringify(parsed, null, 2);
+
+        $("headersOutput").textContent =
+          JSON.stringify(headers, null, 2);
+
+        $("responseState").textContent =
+          response.ok ? "Completed" : "Failed";
+        $("responseState").className =
+          response.ok ? "ok" : "bad";
+      } catch (error) {
+        const elapsed = performance.now() - start;
+
+        $("statusValue").textContent = "Network/CORS error";
+        $("statusValue").className = "bad";
+        $("totalTimeValue").textContent = `${elapsed.toFixed(2)} ms`;
+        $("databaseTimeValue").textContent = "-";
+        $("apiTimeValue").textContent = "-";
+
+        $("responseOutput").textContent = JSON.stringify(
+          {
+            success: false,
+            message: error.message,
+            checks: [
+              "Confirm Node.js server is running",
+              "Confirm IP address and port",
+              "Confirm CORS is enabled",
+              "Confirm device is on the same network",
+            ],
+          },
+          null,
+          2,
+        );
+
+        $("responseState").textContent = "Connection failed";
+        $("responseState").className = "bad";
+      } finally {
+        $("sendBtn").disabled = false;
+        $("requestState").textContent = "Ready";
+        $("requestState").className = "ok";
+        updateCurlPreview();
+      }
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.classList.toggle(
+          "active",
+          tab.dataset.tab === tabName,
+        );
+      });
+
+      $("responseOutput").classList.toggle(
+        "hidden",
+        tabName !== "response",
+      );
+
+      $("headersOutput").classList.toggle(
+        "hidden",
+        tabName !== "headers",
+      );
+
+      $("curlOutput").classList.toggle(
+        "hidden",
+        tabName !== "curl",
+      );
+    }
+
+    loadSettings();
+    buildMenu();
+    selectApi(allApis[0].id);
+
+    ["busNumber", "pickupPointId", "parentId", "studentId"].forEach((id) => {
+      $(id).addEventListener("input", () => {
+        loadSelectedApiSeed();
+      });
+    });
+
+    ["baseUrl", "token", "method", "path", "requestBody"].forEach((id) => {
+      $(id).addEventListener("input", updateCurlPreview);
+      $(id).addEventListener("change", updateCurlPreview);
+    });
+
+    $("saveSettingsBtn").addEventListener("click", saveSettings);
+    $("sendBtn").addEventListener("click", sendRequest);
+    $("reloadSeedBtn").addEventListener("click", loadSelectedApiSeed);
+
+    $("formatBtn").addEventListener("click", () => {
+      try {
+        $("requestBody").value = JSON.stringify(
+          JSON.parse($("requestBody").value || "{}"),
+          null,
+          2,
+        );
+        updateCurlPreview();
+      } catch (error) {
+        alert(`Invalid JSON: ${error.message}`);
+      }
+    });
+
+    $("copyCurlBtn").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(buildCurl());
+      $("requestState").textContent = "cURL copied";
+      $("requestState").className = "ok";
+    });
+
+    $("clearResponseBtn").addEventListener("click", () => {
+      $("responseOutput").textContent = "{}";
+      $("headersOutput").textContent = "{}";
+      $("statusValue").textContent = "-";
+      $("totalTimeValue").textContent = "-";
+      $("databaseTimeValue").textContent = "-";
+      $("apiTimeValue").textContent = "-";
+      $("responseState").textContent = "No request sent";
+      $("responseState").className = "warn";
+    });
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        switchTab(tab.dataset.tab);
+      });
+    });
+  </script>
+</body>
+</html>

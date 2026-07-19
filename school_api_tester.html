@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>School Registration & Auth API Tester</title>
+
+  <style>
+    :root {
+      --bg: #08101f;
+      --side: #0d1628;
+      --panel: #111b30;
+      --panel2: #17233d;
+      --border: #263654;
+      --text: #edf4ff;
+      --muted: #92a3c7;
+      --blue: #5d8cff;
+      --green: #2dd48f;
+      --red: #ff6b7d;
+      --yellow: #ffc857;
+      --input: #0b1426;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 290px 1fr;
+      min-height: 100vh;
+    }
+
+    aside {
+      padding: 20px 14px;
+      background: var(--side);
+      border-right: 1px solid var(--border);
+    }
+
+    aside h1 {
+      margin: 0 0 6px;
+      font-size: 21px;
+    }
+
+    .sub {
+      margin-bottom: 18px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .menu {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .menu button {
+      width: 100%;
+      padding: 12px;
+      cursor: pointer;
+      text-align: left;
+      color: var(--text);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 11px;
+    }
+
+    .menu button:hover,
+    .menu button.active {
+      background: rgba(93, 140, 255, 0.15);
+      border-color: rgba(93, 140, 255, 0.5);
+    }
+
+    .method {
+      display: inline-block;
+      min-width: 54px;
+      padding: 4px 6px;
+      margin-right: 7px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 900;
+      border-radius: 6px;
+    }
+
+    .post {
+      color: #9ab7ff;
+      background: rgba(93, 140, 255, 0.15);
+    }
+
+    .get {
+      color: var(--green);
+      background: rgba(45, 212, 143, 0.12);
+    }
+
+    .delete {
+      color: var(--red);
+      background: rgba(255, 107, 125, 0.12);
+    }
+
+    .small-path {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    main {
+      padding: 22px;
+    }
+
+    .top h2 {
+      margin: 0 0 6px;
+    }
+
+    .top p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .card {
+      margin-bottom: 16px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+
+    .head {
+      padding: 15px 17px;
+      font-weight: 800;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .body {
+      padding: 17px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 13px;
+    }
+
+    .field {
+      margin-bottom: 13px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 11px 12px;
+      color: var(--text);
+      background: var(--input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      outline: none;
+      font: inherit;
+    }
+
+    textarea {
+      min-height: 280px;
+      resize: vertical;
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .request-line {
+      display: grid;
+      grid-template-columns: 110px 1fr auto;
+      gap: 10px;
+      margin-bottom: 13px;
+    }
+
+    .primary,
+    .soft {
+      padding: 11px 15px;
+      cursor: pointer;
+      font-weight: 800;
+      border-radius: 10px;
+    }
+
+    .primary {
+      color: white;
+      background: linear-gradient(135deg, #5d8cff, #3d6cf4);
+      border: 0;
+    }
+
+    .primary:disabled {
+      opacity: 0.72;
+      cursor: not-allowed;
+    }
+
+    .primary.loading::before {
+      content: "";
+      display: inline-block;
+      width: 15px;
+      height: 15px;
+      margin-right: 8px;
+      vertical-align: -3px;
+      border: 2px solid rgba(255, 255, 255, 0.45);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: apiSpin 0.75s linear infinite;
+    }
+
+    @keyframes apiSpin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .soft {
+      margin-right: 8px;
+      color: var(--text);
+      background: var(--panel2);
+      border: 1px solid var(--border);
+    }
+
+    .flow-box {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      padding: 13px;
+      margin-bottom: 13px;
+      background: rgba(93, 140, 255, 0.07);
+      border: 1px dashed rgba(93, 140, 255, 0.4);
+      border-radius: 11px;
+    }
+
+    .flow-box p {
+      grid-column: 1 / -1;
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 13px;
+    }
+
+    .stat {
+      padding: 11px;
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+    }
+
+    .stat small {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+    }
+
+    pre {
+      min-height: 360px;
+      max-height: 600px;
+      margin: 0;
+      padding: 15px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      background: #07101e;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+    }
+
+    .ok { color: var(--green); }
+    .bad { color: var(--red); }
+    .warn { color: var(--yellow); }
+
+    @media (max-width: 850px) {
+      .app { grid-template-columns: 1fr; }
+      .grid,
+      .flow-box { grid-template-columns: 1fr; }
+      .request-line { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <aside>
+      <h1>School API Tester</h1>
+
+      <div class="sub">
+        Registration, OTP verification, login, profile and logout testing.
+      </div>
+
+      <div class="menu" id="menu"></div>
+    </aside>
+
+    <main>
+      <div class="top">
+        <h2 id="title"></h2>
+        <p id="description"></p>
+      </div>
+
+      <section class="card">
+        <div class="head">Common Settings</div>
+
+        <div class="body">
+          <div class="grid">
+            <div class="field">
+              <label>Base URL</label>
+
+              <input
+                id="baseUrl"
+                value="http://192.168.1.7:3000/api/school"
+              />
+            </div>
+
+            <div class="field">
+              <label>Admin Access Token</label>
+
+              <input
+                id="accessToken"
+                type="password"
+                placeholder="Automatically filled after registration/login"
+              />
+            </div>
+          </div>
+
+          <button class="soft" id="saveBtn">
+            Save Base URL & Token
+          </button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="head">Editable Request</div>
+
+        <div class="body">
+          <div class="request-line">
+            <select id="method">
+              <option>GET</option>
+              <option>POST</option>
+              <option>DELETE</option>
+            </select>
+
+            <input id="path" />
+
+            <button class="primary" id="sendBtn">
+              Send API
+            </button>
+          </div>
+
+          <div class="field">
+            <label>Seed JSON Body — Editable</label>
+
+            <textarea id="requestBody">{}</textarea>
+          </div>
+
+          <button class="soft" id="reloadBtn">
+            Reload Seed
+          </button>
+
+          <button class="soft" id="formatBtn">
+            Format JSON
+          </button>
+
+          <div
+            id="startRegistrationOtpBox"
+            class="flow-box"
+            style="display:none; margin-top:14px;"
+          >
+            <div class="field">
+              <label>OTP From Backend Console</label>
+              <input
+                id="startRegistrationOtp"
+                placeholder="Enter the OTP generated by Start Registration"
+              />
+            </div>
+
+            <div class="field">
+              <label>OTP Token From Start Registration API</label>
+              <input
+                id="startRegistrationOtpToken"
+                readonly
+                placeholder="Automatically filled from API response"
+              />
+            </div>
+
+            <p>
+              This section belongs only to Start Registration. After the API
+              succeeds, its OTP token is automatically shown here. The OTP you
+              enter here is carried to Complete Registration.
+            </p>
+          </div>
+
+          <div
+            id="completeRegistrationOtpBox"
+            class="flow-box"
+            style="display:none; margin-top:14px;"
+          >
+            <div class="field">
+              <label>Registration OTP</label>
+              <input
+                id="completeRegistrationOtp"
+                placeholder="Enter registration OTP"
+              />
+            </div>
+
+            <div class="field">
+              <label>Registration OTP Token</label>
+              <input
+                id="completeRegistrationOtpToken"
+                readonly
+                placeholder="Filled automatically from Start Registration"
+              />
+            </div>
+
+            <p>
+              Complete Registration uses the OTP entered by you and the OTP
+              token already received from Start Registration.
+            </p>
+          </div>
+
+          <div
+            id="loginGenerateOtpBox"
+            class="flow-box"
+            style="display:none; margin-top:14px;"
+          >
+            <div class="field">
+              <label>Login OTP From Backend Console</label>
+              <input
+                id="loginGeneratedOtp"
+                placeholder="Enter the OTP generated by Login"
+              />
+            </div>
+
+            <div class="field">
+              <label>Login OTP Token</label>
+              <input
+                id="loginGeneratedOtpToken"
+                readonly
+                placeholder="Automatically filled from Login API response"
+              />
+            </div>
+
+            <p>
+              This section belongs only to Login / Generate OTP. The OTP and
+              token are carried to Verify Login OTP.
+            </p>
+          </div>
+
+          <div
+            id="verifyLoginOtpBox"
+            class="flow-box"
+            style="display:none; margin-top:14px;"
+          >
+            <div class="field">
+              <label>Login OTP</label>
+              <input
+                id="verifyLoginOtp"
+                placeholder="Enter login OTP"
+              />
+            </div>
+
+            <div class="field">
+              <label>Login OTP Token</label>
+              <input
+                id="verifyLoginOtpToken"
+                readonly
+                placeholder="Filled automatically from Login API"
+              />
+            </div>
+
+            <p>
+              Verify Login OTP uses the OTP and token received during Login /
+              Generate OTP.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="head">
+          Response
+          <span id="state" class="warn" style="float:right">
+            Ready
+          </span>
+        </div>
+
+        <div class="body">
+          <div class="stats">
+            <div class="stat">
+              <small>Status</small>
+              <strong id="statusValue">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>Browser Total</small>
+              <strong id="browserTime">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>Database Time</small>
+              <strong id="databaseTime">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>Server API Time</small>
+              <strong id="apiTime">-</strong>
+            </div>
+          </div>
+
+          <pre id="responseOutput">{}</pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const apis = [
+      {
+        id: "register-start",
+        name: "Start Registration",
+        description:
+          "Send school data, generate OTP and receive otpToken. OTP appears only in backend console.",
+        method: "POST",
+        path: "/register/start",
+        protected: false,
+        seed: () => ({
+          schoolId: "YTFTY",
+          name: "Yashveer",
+          phone: "9627068854"
+        })
+      },
+      {
+        id: "register-complete",
+        name: "Complete Registration",
+        description:
+          "Enter console OTP. Backend verifies OTP and creates the school.",
+        method: "POST",
+        path: "/register/complete",
+        protected: false,
+        seed: () => ({
+          schoolId: "SCH-YTFTY",
+          name: "Yashveer",
+          phone: "9627068854",
+          email: "yashveer@example.com",
+          otp: document.getElementById("completeRegistrationOtp").value.trim(),
+          otpToken: document.getElementById("completeRegistrationOtpToken").value.trim(),
+          address: {
+            line1: "Main Road",
+            city: "Meerut",
+            state: "Uttar Pradesh",
+            country: "India",
+            pincode: "250001",
+            latitude: 28.9845,
+            longitude: 77.7064
+          }
+        })
+      },
+      {
+        id: "login",
+        name: "Login / Generate OTP",
+        description:
+          "Generate login OTP and otpToken. OTP appears only in backend console.",
+        method: "POST",
+        path: "/login",
+        protected: false,
+        seed: () => ({
+          phone: "9627068854"
+        })
+      },
+      {
+        id: "login-verify",
+        name: "Verify Login OTP",
+        description:
+          "Verify console OTP, create a new access token and store it in School.token.",
+        method: "POST",
+        path: "/login/verify-otp",
+        protected: false,
+        seed: () => ({
+          phone: "9627068854",
+          otp: document.getElementById("verifyLoginOtp").value.trim(),
+          otpToken: document.getElementById("verifyLoginOtpToken").value.trim()
+        })
+      },
+      {
+        id: "profile",
+        name: "Get Profile",
+        description:
+          "Test protected school dashboard/profile API.",
+        method: "GET",
+        path: "/profile",
+        protected: true,
+        seed: () => null
+      },
+      {
+        id: "logout",
+        name: "Logout",
+        description:
+          "Clear School.token and invalidate the current JWT.",
+        method: "DELETE",
+        path: "/logout",
+        protected: true,
+        seed: () => null
+      }
+    ];
+
+    let selectedApi = apis[0];
+
+    const $ = (id) =>
+      document.getElementById(id);
+
+    function renderMenu() {
+      const menu = $("menu");
+      menu.innerHTML = "";
+
+      apis.forEach((api) => {
+        const button =
+          document.createElement("button");
+
+        button.dataset.id = api.id;
+
+        button.innerHTML = `
+          <span class="method ${api.method.toLowerCase()}">
+            ${api.method}
+          </span>
+          ${api.name}
+          <span class="small-path">${api.path}</span>
+        `;
+
+        button.addEventListener(
+          "click",
+          () => selectApi(api.id)
+        );
+
+        menu.appendChild(button);
+      });
+    }
+
+    function selectApi(id) {
+      selectedApi =
+        apis.find((api) => api.id === id) ||
+        apis[0];
+
+      document
+        .querySelectorAll("#menu button")
+        .forEach((button) => {
+          button.classList.toggle(
+            "active",
+            button.dataset.id === selectedApi.id
+          );
+        });
+
+      $("title").textContent =
+        `${selectedApi.method} — ${selectedApi.name}`;
+
+      $("description").textContent =
+        selectedApi.description;
+
+      $("method").value =
+        selectedApi.method;
+
+      $("path").value =
+        selectedApi.path;
+
+      $("startRegistrationOtpBox").style.display =
+        selectedApi.id === "register-start" ? "grid" : "none";
+
+      $("completeRegistrationOtpBox").style.display =
+        selectedApi.id === "register-complete" ? "grid" : "none";
+
+      $("loginGenerateOtpBox").style.display =
+        selectedApi.id === "login" ? "grid" : "none";
+
+      $("verifyLoginOtpBox").style.display =
+        selectedApi.id === "login-verify" ? "grid" : "none";
+
+      const registrationOtpToken =
+        localStorage.getItem("schoolRegistrationOtpToken") || "";
+
+      if (registrationOtpToken) {
+        $("startRegistrationOtpToken").value = registrationOtpToken;
+        $("completeRegistrationOtpToken").value = registrationOtpToken;
+      }
+
+      const loginOtpToken =
+        localStorage.getItem("schoolLoginOtpToken") || "";
+
+      if (loginOtpToken) {
+        $("loginGeneratedOtpToken").value = loginOtpToken;
+        $("verifyLoginOtpToken").value = loginOtpToken;
+      }
+
+      reloadSeed();
+    }
+
+    function reloadSeed() {
+      const seed =
+        selectedApi.seed();
+
+      $("requestBody").value =
+        seed
+          ? JSON.stringify(seed, null, 2)
+          : "{}";
+    }
+
+    function saveSettings() {
+      localStorage.setItem(
+        "schoolSecureApiTester",
+        JSON.stringify({
+          baseUrl: $("baseUrl").value,
+          accessToken: $("accessToken").value
+        })
+      );
+
+      $("state").textContent =
+        "Settings saved";
+
+      $("state").className = "ok";
+    }
+
+    function loadSettings() {
+      try {
+        const data = JSON.parse(
+          localStorage.getItem(
+            "schoolSecureApiTester"
+          ) || "{}"
+        );
+
+        if (data.baseUrl) {
+          $("baseUrl").value =
+            data.baseUrl;
+        }
+
+        if (data.accessToken) {
+          $("accessToken").value =
+            data.accessToken;
+        }
+
+      } catch (_) {}
+    }
+
+    function readTiming(
+      response,
+      json,
+      headerName,
+      jsonKey
+    ) {
+      const headerValue =
+        response.headers.get(headerName);
+
+      if (headerValue) {
+        return headerValue;
+      }
+
+      if (
+        json &&
+        typeof json === "object" &&
+        json.timing &&
+        json.timing[jsonKey]
+      ) {
+        return json.timing[jsonKey];
+      }
+
+      return "-";
+    }
+
+    async function sendRequest() {
+      const baseUrl =
+        $("baseUrl")
+          .value
+          .trim()
+          .replace(/\/+$/, "");
+
+      const path =
+        $("path").value.startsWith("/")
+          ? $("path").value
+          : `/${$("path").value}`;
+
+      let body = null;
+
+      try {
+        const text =
+          $("requestBody").value.trim();
+
+        body =
+          !text || text === "{}"
+            ? null
+            : JSON.parse(text);
+      } catch (error) {
+        alert(
+          `Invalid JSON: ${error.message}`
+        );
+
+        return;
+      }
+
+      const headers = {
+        Accept: "application/json"
+      };
+
+      if (selectedApi.protected) {
+        const token =
+          $("accessToken").value.trim();
+
+        if (!token) {
+          alert(
+            "Admin access token is required"
+          );
+
+          return;
+        }
+
+        headers.Authorization =
+          `Bearer ${token}`;
+      }
+
+      const options = {
+        method: $("method").value,
+        headers
+      };
+
+      if (
+        body &&
+        $("method").value !== "GET"
+      ) {
+        headers["Content-Type"] =
+          "application/json";
+
+        options.body =
+          JSON.stringify(body);
+      }
+
+      $("sendBtn").disabled = true;
+      $("sendBtn").classList.add("loading");
+      $("sendBtn").textContent = "Processing...";
+      $("state").textContent = "API in process...";
+      $("state").className = "warn";
+
+      const start = performance.now();
+
+      try {
+        const response = await fetch(
+          `${baseUrl}${path}`,
+          options
+        );
+
+        const browserElapsed =
+          performance.now() - start;
+
+        const responseText =
+          await response.text();
+
+        let json;
+
+        try {
+          json = JSON.parse(responseText);
+        } catch (_) {
+          json = responseText;
+        }
+
+        $("statusValue").textContent =
+          `${response.status} ${response.statusText}`;
+
+        $("statusValue").className =
+          response.ok ? "ok" : "bad";
+
+        $("browserTime").textContent =
+          `${browserElapsed.toFixed(2)} ms`;
+
+        $("databaseTime").textContent =
+          readTiming(
+            response,
+            json,
+            "x-database-time",
+            "databaseTime"
+          );
+
+        $("apiTime").textContent =
+          readTiming(
+            response,
+            json,
+            "x-api-time",
+            "apiTime"
+          );
+
+        $("responseOutput").textContent =
+          typeof json === "string"
+            ? json
+            : JSON.stringify(json, null, 2);
+
+        if (
+          json &&
+          typeof json === "object"
+        ) {
+          const responseOtpToken =
+            json.otpToken ||
+            json?.data?.otpToken ||
+            json.otpAuthToken ||
+            json?.data?.otpAuthToken;
+
+          if (responseOtpToken) {
+            if (selectedApi.id === "register-start") {
+              $("startRegistrationOtpToken").value = responseOtpToken;
+              $("completeRegistrationOtpToken").value = responseOtpToken;
+
+              localStorage.setItem(
+                "schoolRegistrationOtpToken",
+                responseOtpToken
+              );
+            }
+
+            if (selectedApi.id === "login") {
+              $("loginGeneratedOtpToken").value = responseOtpToken;
+              $("verifyLoginOtpToken").value = responseOtpToken;
+
+              localStorage.setItem(
+                "schoolLoginOtpToken",
+                responseOtpToken
+              );
+            }
+          }
+
+          if (json.token) {
+            $("accessToken").value =
+              json.token;
+          }
+
+          saveSettings();
+        }
+
+        $("state").textContent =
+          response.ok
+            ? "Completed"
+            : "Failed";
+
+        $("state").className =
+          response.ok ? "ok" : "bad";
+      } catch (error) {
+        $("statusValue").textContent =
+          "Network/CORS error";
+
+        $("statusValue").className =
+          "bad";
+
+        $("browserTime").textContent =
+          `${(
+            performance.now() - start
+          ).toFixed(2)} ms`;
+
+        $("databaseTime").textContent =
+          "-";
+
+        $("apiTime").textContent =
+          "-";
+
+        $("responseOutput").textContent =
+          JSON.stringify(
+            {
+              success: false,
+              message: error.message
+            },
+            null,
+            2
+          );
+
+        $("state").textContent =
+          "Connection failed";
+
+        $("state").className =
+          "bad";
+      } finally {
+        $("sendBtn").disabled = false;
+        $("sendBtn").classList.remove("loading");
+        $("sendBtn").textContent = "Send API";
+      }
+    }
+
+    renderMenu();
+    loadSettings();
+
+    const storedRegistrationOtpToken =
+      localStorage.getItem("schoolRegistrationOtpToken");
+
+    if (storedRegistrationOtpToken) {
+      $("startRegistrationOtpToken").value =
+        storedRegistrationOtpToken;
+
+      $("completeRegistrationOtpToken").value =
+        storedRegistrationOtpToken;
+    }
+
+    const storedLoginOtpToken =
+      localStorage.getItem("schoolLoginOtpToken");
+
+    if (storedLoginOtpToken) {
+      $("loginGeneratedOtpToken").value =
+        storedLoginOtpToken;
+
+      $("verifyLoginOtpToken").value =
+        storedLoginOtpToken;
+    }
+
+    selectApi(apis[0].id);
+
+    $("sendBtn").onclick =
+      sendRequest;
+
+    $("saveBtn").onclick =
+      saveSettings;
+
+    $("reloadBtn").onclick =
+      reloadSeed;
+
+    $("formatBtn").onclick = () => {
+      try {
+        $("requestBody").value =
+          JSON.stringify(
+            JSON.parse(
+              $("requestBody").value ||
+              "{}"
+            ),
+            null,
+            2
+          );
+      } catch (error) {
+        alert(
+          `Invalid JSON: ${error.message}`
+        );
+      }
+    };
+
+    [
+      "completeRegistrationOtp",
+      "completeRegistrationOtpToken",
+      "verifyLoginOtp",
+      "verifyLoginOtpToken"
+    ].forEach((id) => {
+      $(id).addEventListener("input", () => {
+        if (
+          selectedApi.id === "register-complete" ||
+          selectedApi.id === "login-verify"
+        ) {
+          reloadSeed();
+        }
+      });
+    });
+
+    $("startRegistrationOtp").addEventListener("input", () => {
+      $("completeRegistrationOtp").value =
+        $("startRegistrationOtp").value;
+
+      if (selectedApi.id === "register-complete") {
+        reloadSeed();
+      }
+    });
+
+    $("loginGeneratedOtp").addEventListener("input", () => {
+      $("verifyLoginOtp").value =
+        $("loginGeneratedOtp").value;
+
+      if (selectedApi.id === "login-verify") {
+        reloadSeed();
+      }
+    });
+  </script>
+</body>
+</html>

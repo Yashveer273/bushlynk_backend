@@ -1,24 +1,81 @@
 const PickupPoint = require("../models/PickupPoint");
-const students = require("../models/students");
+const User = require("../models/students");
 const generateId = require("../utils/generateId");
 const redisClient = require("../config/redis");
-const mongoose = require("mongoose");
+const { performance } = require("node:perf_hooks");
+
+const clean = (value) => String(value || "").trim();
+const cleanBus = (value) => clean(value).toUpperCase();
+const redisKey = (schoolId, busNumber) =>
+  `pickup_points:${schoolId}:${busNumber}`;
+
+const escapeRegex = (value) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const setPickupCache = async (schoolId, busNumber, pickupPoints) => {
+  try {
+    await redisClient.set(
+      redisKey(schoolId, busNumber),
+      JSON.stringify(pickupPoints || []),
+    );
+    return true;
+  } catch (error) {
+    console.error("Redis pickup cache error:", error);
+    return false;
+  }
+};
+
+const preparePickupPoints = (
+  pickupPoints,
+  { status, createdBy, lastModifiedBy },
+) =>
+  pickupPoints.map((point) => {
+    const coordinates = point?.location?.coordinates;
+
+    if (
+      !clean(point?.name) ||
+      !Array.isArray(coordinates) ||
+      coordinates.length !== 2 ||
+      !coordinates.every(Number.isFinite)
+    ) {
+      throw new Error("Invalid pickup point data");
+    }
+
+    return {
+      pickupPointId: clean(point.pickupPointId) || `PP-${generateId()}`,
+      name: clean(point.name),
+      status,
+      createdBy,
+      lastModifiedBy,
+      location: {
+        type: "Point",
+        coordinates,
+      },
+      radius: Number(point.radius) || 100,
+      assignedStudents: Array.isArray(point.assignedStudents)
+        ? point.assignedStudents
+            .filter((student) => student?.parentId && student?.studentId)
+            .map((student) => ({
+              parentId: clean(student.parentId),
+              childId: clean(student.childId),
+              studentId: clean(student.studentId),
+              busNumber: cleanBus(student.busNumber),
+            }))
+        : [],
+    };
+  });
 
 /*
-=====================================
-1. CREATE PICKUP POINT
-=====================================
+==================================================
+CREATE PICKUP POINT - ADMIN
+One atomic upsert instead of find + save/create
+==================================================
 */
-
 exports.createPickupPoint = async (req, res) => {
   try {
-    const { busNumber, pickupPoints } = req.body;
-    const { schoolId } = req.user;
-    /*
-    =====================================
-    VALIDATION
-    =====================================
-    */
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.body?.busNumber);
+    const pickupPoints = req.body?.pickupPoints;
 
     if (!schoolId || !busNumber) {
       return res.status(400).json({
@@ -27,163 +84,81 @@ exports.createPickupPoint = async (req, res) => {
       });
     }
 
-    if (
-      !pickupPoints ||
-      !Array.isArray(pickupPoints) ||
-      pickupPoints.length === 0
-    ) {
+    if (!Array.isArray(pickupPoints) || pickupPoints.length === 0) {
       return res.status(400).json({
         success: false,
         message: "pickupPoints array required",
       });
     }
 
-    /*
-    =====================================
-    PREPARE PICKUP POINTS
-    =====================================
-    */
-
-    const preparedPickupPoints = pickupPoints.map((point) => {
-      if (
-        !point.name ||
-        !point.location ||
-        !Array.isArray(point.location.coordinates) ||
-        point.location.coordinates.length !== 2
-      ) {
-        throw new Error("Invalid pickup point data");
-      }
-
-      const lng = point.location.coordinates[0];
-
-      const lat = point.location.coordinates[1];
-
-      if (typeof lng !== "number" || typeof lat !== "number") {
-        throw new Error("Coordinates must be numbers");
-      }
-
-      return {
-        pickupPointId: point.pickupPointId || `PP-${generateId()}`,
-
-        name: point.name,
-        status: "PUBLISHED",
-        createdBy: "ADMIN",
-        lastModifiedBy: "Admin",
-        location: point.location,
-
-        radius: point.radius || 100,
-
-        /*
-          IMPORTANT:
-          MULTI CHILD SUPPORT
-          */
-
-        assignedStudents: Array.isArray(point.assignedStudents)
-          ? point.assignedStudents.map((student) => ({
-              parentId: student.parentId,
-
-              childId: student.childId,
-
-              studentId: student.studentId,
-
-              busNumber: student.busNumber,
-            }))
-          : [],
-      };
+    const prepared = preparePickupPoints(pickupPoints, {
+      status: "PUBLISHED",
+      createdBy: "ADMIN",
+      lastModifiedBy: "Admin",
     });
 
-    /*
-    =====================================
-    FIND EXISTING DOCUMENT
-    =====================================
-    */
-
-    const existing = await PickupPoint.findOne({
-      schoolId,
-      busNumber,
-    });
-
-    /*
-    =====================================
-    UPDATE EXISTING
-    =====================================
-    */
-
-    if (existing) {
-      existing.pickupPoints.push(...preparedPickupPoints);
-
-      await existing.save();
-
-      /*
-      REDIS SYNC
-      */
-
-      const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-      await redisClient.set(
-        redisKey,
-
-        JSON.stringify(existing.pickupPoints),
-      );
-
-      return res.status(200).json({
-        success: true,
-
-        message: "Pickup points added successfully",
-
-        data: existing,
-      });
-    }
-
-    /*
-    =====================================
-    CREATE NEW DOCUMENT
-    =====================================
-    */
-
-    const newPickupPoint = await PickupPoint.create({
-      schoolId,
-      busNumber,
-
-      pickupPoints: preparedPickupPoints,
-    });
-
-    /*
-    REDIS SYNC
-    */
-
-    const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-    await redisClient.set(
-      redisKey,
-
-      JSON.stringify(newPickupPoint.pickupPoints),
+    const updatedDoc = await PickupPoint.findOneAndUpdate(
+      { schoolId, busNumber },
+      {
+        $setOnInsert: { schoolId, busNumber, radius: 150 },
+        $push: { pickupPoints: { $each: prepared } },
+      },
+      {
+        new: true,
+        upsert: true,
+        projection: {
+          _id: 1,
+          schoolId: 1,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: 1,
+        },
+        lean: true,
+      },
     );
 
-    return res.status(201).json({
+    await setPickupCache(schoolId, busNumber, updatedDoc.pickupPoints);
+
+    return res.status(200).json({
       success: true,
-
-      message: "Pickup document created successfully",
-
-      data: newPickupPoint,
+      message: "Pickup points added successfully",
+      data: updatedDoc,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("createPickupPoint:", error);
     return res.status(500).json({
       success: false,
-
       message: error.message || "Server error",
     });
   }
 };
+
+/*
+==================================================
+UPDATE SINGLE PICKUP STATUS
+One update + returned projection; no second find
+==================================================
+*/
 exports.updateSinglePickupPointStatus = async (req, res) => {
   try {
-    const { busNumber, pickupPointId, status } = req.body;
-    const { schoolId } = req.user;
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.body?.busNumber);
+    const pickupPointId = clean(req.body?.pickupPointId);
+    const status = clean(req.body?.status).toUpperCase();
 
-    // Use updateOne with the positional $ operator to target the specific point
-    const result = await PickupPoint.updateOne(
+    if (
+      !schoolId ||
+      !busNumber ||
+      !pickupPointId ||
+      !["DRAFT", "PUBLISHED"].includes(status)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid schoolId, busNumber, pickupPointId and status required",
+      });
+    }
+
+    const updatedDoc = await PickupPoint.findOneAndUpdate(
       {
         schoolId,
         busNumber,
@@ -195,242 +170,121 @@ exports.updateSinglePickupPointStatus = async (req, res) => {
           "pickupPoints.$.lastModifiedBy": "ADMIN",
         },
       },
+      {
+        new: true,
+        projection: { _id: 0, pickupPoints: 1 },
+        lean: true,
+      },
     );
 
-    if (result.matchedCount === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Route or Pickup Point not found" });
+    if (!updatedDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Route or pickup point not found",
+      });
     }
 
-    // Optional: Refresh Redis cache (since the DB is now updated)
-    const updatedDoc = await PickupPoint.findOne({ schoolId, busNumber });
-    await redisClient.set(
-      `pickup_points:${schoolId}:${busNumber}`,
-      JSON.stringify(updatedDoc.pickupPoints),
-    );
+    await setPickupCache(schoolId, busNumber, updatedDoc.pickupPoints);
 
     return res.status(200).json({
       success: true,
       message: "Pickup point status updated successfully",
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("updateSinglePickupPointStatus:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
+    });
   }
 };
+
+/*
+==================================================
+CREATE PICKUP POINT - DRIVER
+One atomic upsert
+==================================================
+*/
 exports.createPickupPointByDriver = async (req, res) => {
   try {
-    const { busNumber, pickupPoints } = req.body;
-    const  schoolId  = req.schoolId;
-    const driver_phone = req.driver.phone;
-  
-    /*
-    =====================================
-    VALIDATION
-    =====================================
-    */
+    const schoolId = clean(req.schoolId);
+    const driverPhone = clean(req.driver?.phone);
+    const busNumber = cleanBus(req.body?.busNumber);
+    const pickupPoints = req.body?.pickupPoints;
 
-    if (!schoolId || !driver_phone || !busNumber) {
+    if (!schoolId || !driverPhone || !busNumber) {
       return res.status(400).json({
         success: false,
-        message: "schoolId, driver phone, and busNumber required",
+        message: "schoolId, driver phone and busNumber required",
       });
     }
 
-    if (
-      !pickupPoints ||
-      !Array.isArray(pickupPoints) ||
-      pickupPoints.length === 0
-    ) {
+    if (!Array.isArray(pickupPoints) || pickupPoints.length === 0) {
       return res.status(400).json({
         success: false,
         message: "pickupPoints array required",
       });
     }
 
-    /*
-    =====================================
-    PREPARE PICKUP POINTS
-    =====================================
-    */
-
-    const preparedPickupPoints = pickupPoints.map((point) => {
-      if (
-        !point.name ||
-        !point.location ||
-        !Array.isArray(point.location.coordinates) ||
-        point.location.coordinates.length !== 2
-      ) {
-        throw new Error("Invalid pickup point data");
-      }
-
-      const lng = point.location.coordinates[0];
-
-      const lat = point.location.coordinates[1];
-
-      if (typeof lng !== "number" || typeof lat !== "number") {
-        throw new Error("Coordinates must be numbers");
-      }
-
-      return {
-        pickupPointId: point.pickupPointId || `PP-${generateId()}`,
-
-        name: point.name,
-        status: "DRAFT",
-        createdBy: "DRIVER",
-        lastModifiedBy: driver_phone,
-        location: point.location,
-
-        radius: point.radius || 100,
-
-        /*
-          IMPORTANT:
-          MULTI CHILD SUPPORT
-          */
-
-        assignedStudents: Array.isArray(point.assignedStudents)
-          ? point.assignedStudents.map((student) => ({
-              parentId: student.parentId,
-
-              childId: student.childId,
-
-              studentId: student.studentId,
-
-              busNumber: student.busNumber,
-            }))
-          : [],
-      };
+    const prepared = preparePickupPoints(pickupPoints, {
+      status: "DRAFT",
+      createdBy: "DRIVER",
+      lastModifiedBy: driverPhone,
     });
 
-    /*
-    =====================================
-    FIND EXISTING DOCUMENT
-    =====================================
-    */
-
-    const existing = await PickupPoint.findOne({
-      schoolId,
-      busNumber,
-    });
-
-    /*
-    =====================================
-    UPDATE EXISTING
-    =====================================
-    */
-
-    if (existing) {
-      existing.pickupPoints.push(...preparedPickupPoints);
-
-      await existing.save();
-
-      /*
-      REDIS SYNC
-      */
-
-      const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-      await redisClient.set(
-        redisKey,
-
-        JSON.stringify(existing.pickupPoints),
-      );
-
-      return res.status(200).json({
-        success: true,
-
-        message: "Pickup points added successfully",
-
-        data: existing,
-      });
-    }
-
-    /*
-    =====================================
-    CREATE NEW DOCUMENT
-    =====================================
-    */
-
-    const newPickupPoint = await PickupPoint.create({
-      schoolId,
-      busNumber,
-
-      pickupPoints: preparedPickupPoints,
-    });
-
-    /*
-    REDIS SYNC
-    */
-
-    const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-    await redisClient.set(
-      redisKey,
-
-      JSON.stringify(newPickupPoint.pickupPoints),
+    const updatedDoc = await PickupPoint.findOneAndUpdate(
+      { schoolId, busNumber },
+      {
+        $setOnInsert: { schoolId, busNumber, radius: 150 },
+        $push: { pickupPoints: { $each: prepared } },
+      },
+      {
+        new: true,
+        upsert: true,
+        projection: {
+          _id: 1,
+          schoolId: 1,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: 1,
+        },
+        lean: true,
+      },
     );
 
-    return res.status(201).json({
+    await setPickupCache(schoolId, busNumber, updatedDoc.pickupPoints);
+
+    return res.status(200).json({
       success: true,
-
-      message: "Pickup document created successfully",
-
-      data: newPickupPoint,
+      message: "Pickup points added successfully",
+      data: updatedDoc,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("createPickupPointByDriver:", error);
     return res.status(500).json({
       success: false,
-
       message: error.message || "Server error",
     });
   }
 };
+
 /*
-=====================================
-2. ADD STUDENT
-=====================================
+==================================================
+ADD STUDENT
+Two small concurrent validation reads instead of
+multiple full-document sequential reads.
+Then two targeted atomic writes.
+==================================================
 */
-
-
 exports.addStudent = async (req, res) => {
   try {
-    const {
-    
-      busNumber,
-      pickupPointId,
-      student,
-    } = req.body;
-   const { schoolId } = req.user;
-    /*
-    EXPECTED REQUEST BODY
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.body?.busNumber);
+    const pickupPointId = clean(req.body?.pickupPointId);
+    const parentId = clean(req.body?.student?.parentId);
+    const studentId = clean(req.body?.student?.studentId);
 
-    {
-      "schoolId": "YTFTY",
-      "busNumber": "UP15AB123",
-      "pickupPointId": "PP-49PY694I",
-      "student": {
-        "parentId": "4APXHGTI",
-        "studentId": "STU-819252-11"
-      }
-    }
-    */
-
-    /*
-    =====================================
-    REQUIRED FIELD VALIDATION
-    =====================================
-    */
-
-    if (
-      !schoolId ||
-      !busNumber ||
-      !pickupPointId ||
-    
-      !student.parentId ||
-      !student.studentId
-    ) {
+    if (!schoolId || !busNumber || !pickupPointId || !parentId || !studentId) {
       return res.status(400).json({
         success: false,
         code: "REQUIRED_FIELDS_MISSING",
@@ -439,577 +293,287 @@ exports.addStudent = async (req, res) => {
       });
     }
 
-    const cleanSchoolId = String(schoolId).trim();
-    const cleanBusNumber = String(busNumber).trim();
-    const cleanPickupPointId = String(pickupPointId).trim();
-    const cleanParentId = String(student.parentId).trim();
-    const cleanStudentId = String(student.studentId).trim();
-
-    if (
-      !cleanSchoolId ||
-      !cleanBusNumber ||
-      !cleanPickupPointId ||
-      !cleanParentId ||
-      !cleanStudentId
-    ) {
-      return res.status(400).json({
-        success: false,
-        code: "EMPTY_FIELD_VALUE",
-        message: "Required fields cannot contain empty values",
-      });
-    }
-
-    /*
-    =====================================
-    FIND TARGET BUS PICKUP DOCUMENT
-    =====================================
-    */
-
-    const pickupDoc = await PickupPoint.findOne({
-      schoolId: cleanSchoolId,
-      busNumber: cleanBusNumber,
-    });
-
-    if (!pickupDoc) {
-      return res.status(404).json({
-        success: false,
-        code: "PICKUP_DOCUMENT_NOT_FOUND",
-        message:
-          "No pickup-point document exists for the selected school and bus",
-
-        requestedAssignment: {
-          schoolId: cleanSchoolId,
-          busNumber: cleanBusNumber,
-          pickupPointId: cleanPickupPointId,
-          parentId: cleanParentId,
-          studentId: cleanStudentId,
+    const [pickupState, parentDoc] = await Promise.all([
+      PickupPoint.aggregate([
+        {
+          $match: {
+            schoolId,
+            $or: [
+              { busNumber },
+              {
+                "pickupPoints.assignedStudents": {
+                  $elemMatch: { parentId, studentId },
+                },
+              },
+            ],
+          },
         },
-      });
-    }
+        {
+          $project: {
+            _id: 0,
+            busNumber: 1,
+            pickupPoints: {
+              $filter: {
+                input: { $ifNull: ["$pickupPoints", []] },
+                as: "point",
+                cond: {
+                  $or: [
+                    { $eq: ["$$point.pickupPointId", pickupPointId] },
+                    {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: {
+                                $ifNull: ["$$point.assignedStudents", []],
+                              },
+                              as: "assigned",
+                              cond: {
+                                $and: [
+                                  { $eq: ["$$assigned.parentId", parentId] },
+                                  { $eq: ["$$assigned.studentId", studentId] },
+                                ],
+                              },
+                            },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ]),
+      User.findOne(
+        {
+          schoolId,
+          parentId,
+          "status.active": true,
+          children: {
+            $elemMatch: {
+              studentId,
+              "status.active": true,
+            },
+          },
+        },
+        {
+          _id: 0,
+          parentId: 1,
+          children: {
+            $elemMatch: {
+              studentId,
+              "status.active": true,
+            },
+          },
+        },
+      ).lean(),
+    ]);
 
-    /*
-    =====================================
-    FIND TARGET PICKUP POINT
-    =====================================
-    */
-
-    const targetPoint = pickupDoc.pickupPoints.find(
-      (point) =>
-        String(point.pickupPointId).trim() === cleanPickupPointId,
+    const targetBus = pickupState.find((doc) => doc.busNumber === busNumber);
+    const targetPoint = targetBus?.pickupPoints?.find(
+      (point) => point.pickupPointId === pickupPointId,
     );
 
     if (!targetPoint) {
       return res.status(404).json({
         success: false,
         code: "PICKUP_POINT_NOT_FOUND",
-        message:
-          "The selected pickup point does not exist on the selected bus",
-
-        requestedAssignment: {
-          schoolId: cleanSchoolId,
-          busNumber: cleanBusNumber,
-          pickupPointId: cleanPickupPointId,
-          parentId: cleanParentId,
-          studentId: cleanStudentId,
-        },
+        message: "The selected pickup point does not exist on the selected bus",
       });
     }
 
-    /*
-    =====================================
-    FIND PARENT USING:
-    SCHOOL ID + PARENT ID
-    =====================================
-    */
-
-    const parentDoc = await students.findOne({
-      schoolId: cleanSchoolId,
-      parentId: cleanParentId,
-    });
-
-    if (!parentDoc) {
+    if (!parentDoc?.children?.[0]) {
       return res.status(404).json({
         success: false,
-        code: "PARENT_NOT_FOUND",
-        message:
-          "Parent was not found using the provided school ID and parent ID",
-
-        requestedAssignment: {
-          schoolId: cleanSchoolId,
-          parentId: cleanParentId,
-          studentId: cleanStudentId,
-          busNumber: cleanBusNumber,
-          pickupPointId: cleanPickupPointId,
-        },
+        code: "ACTIVE_PARENT_OR_STUDENT_NOT_FOUND",
+        message: "Active parent or active student was not found",
       });
     }
 
-    /*
-    =====================================
-    CHECK PARENT STATUS
-    =====================================
-    */
-
-    if (parentDoc.status?.active === false) {
-      return res.status(400).json({
-        success: false,
-        code: "PARENT_INACTIVE",
-        message:
-          "The parent account is inactive and cannot receive a new assignment",
-
-        requestedAssignment: {
-          schoolId: cleanSchoolId,
-          parentId: cleanParentId,
-          studentId: cleanStudentId,
-          busNumber: cleanBusNumber,
-          pickupPointId: cleanPickupPointId,
-        },
-      });
-    }
-
-    /*
-    =====================================
-    FIND STUDENT INSIDE CHILDREN ARRAY
-    =====================================
-    */
-
-    const child = parentDoc.children.find(
-      (item) =>
-        String(item.studentId).trim() === cleanStudentId,
+    const child = parentDoc.children[0];
+    const conflictDoc = pickupState.find((doc) =>
+      doc.pickupPoints?.some((point) =>
+        point.assignedStudents?.some(
+          (assigned) =>
+            assigned.parentId === parentId &&
+            assigned.studentId === studentId,
+        ),
+      ),
     );
 
-    if (!child) {
-      return res.status(404).json({
-        success: false,
-        code: "STUDENT_NOT_FOUND",
-        message:
-          "The student was not found inside this parent's children array",
+    const conflictPoint = conflictDoc?.pickupPoints?.find((point) =>
+      point.assignedStudents?.some(
+        (assigned) =>
+          assigned.parentId === parentId &&
+          assigned.studentId === studentId,
+      ),
+    );
 
-        requestedAssignment: {
-          schoolId: cleanSchoolId,
-          parentId: cleanParentId,
-          studentId: cleanStudentId,
-          busNumber: cleanBusNumber,
-          pickupPointId: cleanPickupPointId,
+    if (conflictDoc && conflictPoint) {
+      const sameBus = conflictDoc.busNumber === busNumber;
+      const samePoint = conflictPoint.pickupPointId === pickupPointId;
+
+      return res.status(409).json({
+        success: false,
+        code: sameBus
+          ? samePoint
+            ? "STUDENT_ALREADY_ASSIGNED_SAME_POINT"
+            : "STUDENT_ASSIGNED_OTHER_POINT_SAME_BUS"
+          : "STUDENT_ASSIGNED_OTHER_BUS",
+        conflictType: sameBus
+          ? samePoint
+            ? "SAME_BUS_SAME_PICKUP_POINT"
+            : "SAME_BUS_DIFFERENT_PICKUP_POINT"
+          : "DIFFERENT_BUS",
+        message: sameBus
+          ? samePoint
+            ? "This student is already assigned to this pickup point"
+            : "This student is already assigned to another pickup point on the same bus"
+          : "This student is already assigned to another bus and pickup point",
+        existingAssignment: {
+          schoolId,
+          parentId,
+          studentId,
+          busNumber: conflictDoc.busNumber,
+          pickupPointId: conflictPoint.pickupPointId,
+          pickupPointName: conflictPoint.name || null,
         },
       });
     }
 
-    /*
-    =====================================
-    CHECK STUDENT STATUS
-    =====================================
-    */
+    const existingChildBus = cleanBus(child.busNumber);
+    const existingChildPoint = clean(child.pickupPointId);
 
-    if (child.status?.active === false) {
-      return res.status(400).json({
+    if (existingChildBus || existingChildPoint) {
+      return res.status(409).json({
         success: false,
-        code: "STUDENT_INACTIVE",
+        code: "CHILD_RECORD_HAS_OTHER_ASSIGNMENT",
         message:
-          "The student is inactive and cannot be assigned to a pickup point",
-
-        requestedAssignment: {
-          schoolId: cleanSchoolId,
-          parentId: cleanParentId,
-          studentId: cleanStudentId,
-          busNumber: cleanBusNumber,
-          pickupPointId: cleanPickupPointId,
+          "The child record already contains a bus or pickup point assignment",
+        existingAssignment: {
+          schoolId,
+          parentId,
+          studentId,
+          busNumber: existingChildBus || null,
+          pickupPointId: existingChildPoint || null,
+          source: "CHILD_RECORD",
         },
       });
     }
 
-    /*
-    =====================================
-    CHECK STUDENT ACROSS ALL BUSES
-    AND ALL PICKUP POINTS OF THE SCHOOL
+    const userUpdate = await User.updateOne(
+      {
+        schoolId,
+        parentId,
+        "status.active": true,
+        children: {
+          $elemMatch: {
+            studentId,
+            "status.active": true,
+            $and: [
+              {
+                $or: [
+                  { busNumber: { $exists: false } },
+                  { busNumber: "" },
+                  { busNumber: null },
+                ],
+              },
+              {
+                $or: [
+                  { pickupPointId: { $exists: false } },
+                  { pickupPointId: "" },
+                  { pickupPointId: null },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      {
+        $set: {
+          "children.$.busNumber": busNumber,
+          "children.$.pickupPointId": pickupPointId,
+        },
+      },
+    );
 
-    This identifies:
+    if (userUpdate.modifiedCount === 0) {
+      return res.status(409).json({
+        success: false,
+        code: "STUDENT_ASSIGNMENT_CHANGED",
+        message: "Student assignment changed during this request",
+      });
+    }
 
-    1. Same bus and same pickup point
-    2. Same bus and different pickup point
-    3. Different bus and pickup point
-    =====================================
-    */
-
-    const existingPickupDocument = await PickupPoint.findOne({
-      schoolId: cleanSchoolId,
-
-      pickupPoints: {
-        $elemMatch: {
-          assignedStudents: {
-            $elemMatch: {
-              parentId: cleanParentId,
-              studentId: cleanStudentId,
+    const updatedPickup = await PickupPoint.findOneAndUpdate(
+      {
+        schoolId,
+        busNumber,
+        pickupPoints: {
+          $elemMatch: {
+            pickupPointId,
+            assignedStudents: {
+              $not: {
+                $elemMatch: { parentId, studentId },
+              },
             },
           },
         },
       },
-    });
-
-    if (existingPickupDocument) {
-      const existingPoint =
-        existingPickupDocument.pickupPoints.find((point) =>
-          point.assignedStudents.some(
-            (assignedStudent) =>
-              String(assignedStudent.parentId).trim() ===
-                cleanParentId &&
-              String(assignedStudent.studentId).trim() ===
-                cleanStudentId,
-          ),
-        );
-
-      if (existingPoint) {
-        const existingBusNumber = String(
-          existingPickupDocument.busNumber,
-        ).trim();
-
-        const existingPickupPointId = String(
-          existingPoint.pickupPointId,
-        ).trim();
-
-        const sameBus =
-          existingBusNumber === cleanBusNumber;
-
-        const samePickupPoint =
-          existingPickupPointId === cleanPickupPointId;
-
-        /*
-        =====================================
-        SAME BUS + SAME PICKUP POINT
-        =====================================
-        */
-
-        if (sameBus && samePickupPoint) {
-          return res.status(409).json({
-            success: false,
-            code: "STUDENT_ALREADY_ASSIGNED_SAME_POINT",
-            conflictType: "SAME_BUS_SAME_PICKUP_POINT",
-
-            message:
-              "This student is already assigned to this pickup point",
-
-            existingAssignment: {
-              schoolId: cleanSchoolId,
-              parentId: cleanParentId,
-              studentId: cleanStudentId,
-              busNumber: existingBusNumber,
-              pickupPointId: existingPickupPointId,
-              pickupPointName: existingPoint.name || null,
-            },
-
-            requestedAssignment: {
-              schoolId: cleanSchoolId,
-              parentId: cleanParentId,
-              studentId: cleanStudentId,
-              busNumber: cleanBusNumber,
-              pickupPointId: cleanPickupPointId,
-              pickupPointName: targetPoint.name || null,
-            },
-
-            adminAction:
-              "The student is already assigned here, so no new assignment is required.",
-          });
-        }
-
-        /*
-        =====================================
-        SAME BUS + DIFFERENT PICKUP POINT
-        =====================================
-        */
-
-        if (sameBus && !samePickupPoint) {
-          return res.status(409).json({
-            success: false,
-            code: "STUDENT_ASSIGNED_OTHER_POINT_SAME_BUS",
-            conflictType: "SAME_BUS_DIFFERENT_PICKUP_POINT",
-
-            message:
-              "This student is already assigned to another pickup point on the same bus",
-
-            existingAssignment: {
-              schoolId: cleanSchoolId,
-              parentId: cleanParentId,
-              studentId: cleanStudentId,
-              busNumber: existingBusNumber,
-              pickupPointId: existingPickupPointId,
-              pickupPointName: existingPoint.name || null,
-            },
-
-            requestedAssignment: {
-              schoolId: cleanSchoolId,
-              parentId: cleanParentId,
-              studentId: cleanStudentId,
-              busNumber: cleanBusNumber,
-              pickupPointId: cleanPickupPointId,
-              pickupPointName: targetPoint.name || null,
-            },
-
-            adminAction:
-              "Remove the student from the existing pickup point and then submit the new assignment again.",
-          });
-        }
-
-        /*
-        =====================================
-        DIFFERENT BUS
-        =====================================
-        */
-
-        if (!sameBus) {
-          return res.status(409).json({
-            success: false,
-            code: "STUDENT_ASSIGNED_OTHER_BUS",
-            conflictType: "DIFFERENT_BUS",
-
-            message:
-              "This student is already assigned to another bus and pickup point",
-
-            existingAssignment: {
-              schoolId: cleanSchoolId,
-              parentId: cleanParentId,
-              studentId: cleanStudentId,
-              busNumber: existingBusNumber,
-              pickupPointId: existingPickupPointId,
-              pickupPointName: existingPoint.name || null,
-            },
-
-            requestedAssignment: {
-              schoolId: cleanSchoolId,
-              parentId: cleanParentId,
-              studentId: cleanStudentId,
-              busNumber: cleanBusNumber,
-              pickupPointId: cleanPickupPointId,
-              pickupPointName: targetPoint.name || null,
-            },
-
-            adminAction:
-              "Remove the student from the existing bus and pickup point before adding the new assignment.",
-          });
-        }
-      }
-    }
-
-    /*
-    =====================================
-    CHECK CHILD ARRAY ASSIGNMENT
-
-    This catches inconsistent data where
-    busNumber or pickupPointId exists inside
-    the child record, but the student is not
-    present in the PickupPoint document.
-    =====================================
-    */
-
-    const existingChildBusNumber = child.busNumber
-      ? String(child.busNumber).trim()
-      : "";
-
-    const existingChildPickupPointId = child.pickupPointId
-      ? String(child.pickupPointId).trim()
-      : "";
-
-    const childHasAssignment =
-      Boolean(existingChildBusNumber) ||
-      Boolean(existingChildPickupPointId);
-
-    if (childHasAssignment) {
-      const sameChildBus =
-        existingChildBusNumber === cleanBusNumber;
-
-      const sameChildPickupPoint =
-        existingChildPickupPointId === cleanPickupPointId;
-
-      /*
-      =====================================
-      CHILD HAS SAME ASSIGNMENT BUT
-      PICKUP DOCUMENT DOES NOT
-      =====================================
-      */
-
-      if (sameChildBus && sameChildPickupPoint) {
-        return res.status(409).json({
-          success: false,
-          code: "CHILD_RECORD_HAS_SAME_ASSIGNMENT",
-          conflictType: "INCONSISTENT_SAME_ASSIGNMENT",
-
-          message:
-            "The child record contains this bus and pickup point, but the pickup-point record does not contain the student",
-
-          existingAssignment: {
-            schoolId: cleanSchoolId,
-            parentId: cleanParentId,
-            studentId: cleanStudentId,
-            busNumber: existingChildBusNumber || null,
-            pickupPointId:
-              existingChildPickupPointId || null,
-            source: "CHILD_RECORD",
+      {
+        $push: {
+          "pickupPoints.$.assignedStudents": {
+            parentId,
+            studentId,
+            busNumber,
           },
+        },
+      },
+      {
+        new: true,
+        projection: { _id: 0, pickupPoints: 1 },
+        lean: true,
+      },
+    );
 
-          requestedAssignment: {
-            schoolId: cleanSchoolId,
-            parentId: cleanParentId,
-            studentId: cleanStudentId,
-            busNumber: cleanBusNumber,
-            pickupPointId: cleanPickupPointId,
-            pickupPointName: targetPoint.name || null,
+    if (!updatedPickup) {
+      await User.updateOne(
+        { schoolId, parentId, "children.studentId": studentId },
+        {
+          $set: {
+            "children.$.busNumber": "",
+            "children.$.pickupPointId": "",
           },
-
-          adminAction:
-            "Check and repair the child assignment before adding the student again.",
-        });
-      }
-
-      /*
-      =====================================
-      CHILD HAS ANOTHER ASSIGNMENT
-      =====================================
-      */
+        },
+      );
 
       return res.status(409).json({
         success: false,
-        code: "CHILD_RECORD_HAS_OTHER_ASSIGNMENT",
-        conflictType: "CHILD_RECORD_DIFFERENT_ASSIGNMENT",
-
-        message:
-          "The child record already contains another bus or pickup point assignment",
-
-        existingAssignment: {
-          schoolId: cleanSchoolId,
-          parentId: cleanParentId,
-          studentId: cleanStudentId,
-          busNumber: existingChildBusNumber || null,
-          pickupPointId:
-            existingChildPickupPointId || null,
-          source: "CHILD_RECORD",
-        },
-
-        requestedAssignment: {
-          schoolId: cleanSchoolId,
-          parentId: cleanParentId,
-          studentId: cleanStudentId,
-          busNumber: cleanBusNumber,
-          pickupPointId: cleanPickupPointId,
-          pickupPointName: targetPoint.name || null,
-        },
-
-        adminAction:
-          "Remove the previous bus and pickup-point assignment before adding the new assignment.",
+        code: "PICKUP_ASSIGNMENT_CHANGED",
+        message: "Pickup assignment changed during this request",
       });
     }
 
-    /*
-    =====================================
-    ALL VALIDATIONS COMPLETED
-
-    NOW ADD STUDENT TO PICKUP POINT
-    =====================================
-    */
-
-    targetPoint.assignedStudents.push({
-      parentId: cleanParentId,
-      studentId: cleanStudentId,
-      busNumber: cleanBusNumber,
-    });
-
-    /*
-    =====================================
-    UPDATE CHILD ARRAY
-    =====================================
-    */
-
-    child.busNumber = cleanBusNumber;
-    child.pickupPointId = cleanPickupPointId;
-
-    /*
-    =====================================
-    SAVE PICKUP DOCUMENT
-    =====================================
-    */
-
-    await pickupDoc.save();
-
-    /*
-    =====================================
-    SAVE PARENT DOCUMENT
-
-    If parent save fails, remove the newly
-    added pickup-point assignment.
-    =====================================
-    */
-
-    try {
-      await parentDoc.save();
-    } catch (parentSaveError) {
-      targetPoint.assignedStudents =
-        targetPoint.assignedStudents.filter(
-          (assignedStudent) =>
-            !(
-              String(assignedStudent.parentId).trim() ===
-                cleanParentId &&
-              String(assignedStudent.studentId).trim() ===
-                cleanStudentId
-            ),
-        );
-
-      await pickupDoc.save();
-
-      throw parentSaveError;
-    }
-
-    /*
-    =====================================
-    REDIS SYNC
-    =====================================
-    */
-
-    const redisKey =
-      `pickup_points:${cleanSchoolId}:${cleanBusNumber}`;
-
-    try {
-      await redisClient.set(
-        redisKey,
-        JSON.stringify(pickupDoc.pickupPoints),
-      );
-    } catch (redisError) {
-      console.error(
-        "Redis synchronization failed:",
-        redisError,
-      );
-    }
-
-    /*
-    =====================================
-    SUCCESS RESPONSE
-    =====================================
-    */
+    await setPickupCache(schoolId, busNumber, updatedPickup.pickupPoints);
 
     return res.status(200).json({
       success: true,
       code: "STUDENT_ASSIGNED_SUCCESSFULLY",
-      message:
-        "Student assigned to pickup point successfully",
-
+      message: "Student assigned to pickup point successfully",
       assignment: {
-        schoolId: cleanSchoolId,
-        parentId: cleanParentId,
-        studentId: cleanStudentId,
-        busNumber: cleanBusNumber,
-        pickupPointId: cleanPickupPointId,
+        schoolId,
+        parentId,
+        studentId,
+        busNumber,
+        pickupPointId,
         pickupPointName: targetPoint.name || null,
       },
     });
   } catch (error) {
-    console.error("Add student error:", error);
-
-    if (error.name === "ValidationError") {
-      return res.status(400).json({
-        success: false,
-        code: "DATABASE_VALIDATION_FAILED",
-        message: "Database validation failed",
-        error: error.message,
-      });
-    }
-
+    console.error("addStudent:", error);
     return res.status(500).json({
       success: false,
       code: "ADD_STUDENT_SERVER_ERROR",
@@ -1020,928 +584,1032 @@ exports.addStudent = async (req, res) => {
 };
 
 /*
-=====================================
-3. REMOVE STUDENT
-=====================================
+==================================================
+REMOVE STUDENT
+No preliminary full-document read.
+Two targeted writes; returned pickup projection
+is reused for Redis and response.
+==================================================
 */
-
 exports.removeStudent = async (req, res) => {
   try {
-    const { busNumber, pickupPointId, parentId, childId } = req.body;
-    const { schoolId } = req.user;
-    /*
-    =====================================
-    FIND DOCUMENT
-    =====================================
-    */
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.body?.busNumber);
+    const pickupPointId = clean(req.body?.pickupPointId);
+    const parentId = clean(req.body?.parentId);
+    const studentId = clean(req.body?.studentId);
 
-    const pickupDoc = await PickupPoint.findOne({
+    if (!schoolId || !busNumber || !pickupPointId || !parentId || !studentId) {
+      return res.status(400).json({
+        success: false,
+        code: "REQUIRED_FIELDS_MISSING",
+        message:
+          "School ID, bus number, pickup point ID, parent ID and student ID are required",
+      });
+    }
+
+    const updatedPickup = await PickupPoint.findOneAndUpdate(
+      {
+        schoolId,
+        busNumber,
+        pickupPoints: {
+          $elemMatch: {
+            pickupPointId,
+            assignedStudents: {
+              $elemMatch: { parentId, studentId },
+            },
+          },
+        },
+      },
+      {
+        $pull: {
+          "pickupPoints.$[point].assignedStudents": {
+            parentId,
+            studentId,
+          },
+        },
+      },
+      {
+        arrayFilters: [{ "point.pickupPointId": pickupPointId }],
+        new: true,
+        projection: {
+          _id: 0,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: 1,
+        },
+        lean: true,
+      },
+    );
+
+    if (!updatedPickup) {
+      return res.status(404).json({
+        success: false,
+        code: "STUDENT_ASSIGNMENT_NOT_FOUND",
+        message: "Student is not assigned to this pickup point",
+      });
+    }
+
+    const userUpdate = await User.updateOne(
+      {
+        schoolId,
+        parentId,
+        children: {
+          $elemMatch: {
+            studentId,
+            busNumber,
+            pickupPointId,
+          },
+        },
+      },
+      {
+        $set: {
+          "children.$.busNumber": "",
+          "children.$.pickupPointId": "",
+        },
+      },
+    );
+
+    const redisSynced = await setPickupCache(
       schoolId,
       busNumber,
-    });
-
-    if (!pickupDoc) {
-      return res.status(404).json({
-        success: false,
-
-        message: "Pickup document not found",
-      });
-    }
-
-    /*
-    =====================================
-    FIND PICKUP POINT
-    =====================================
-    */
-
-    const point = pickupDoc.pickupPoints.find(
-      (p) => p.pickupPointId === pickupPointId,
-    );
-
-    if (!point) {
-      return res.status(404).json({
-        success: false,
-
-        message: "Pickup point not found",
-      });
-    }
-
-    /*
-    =====================================
-    REMOVE SPECIFIC CHILD
-    =====================================
-    */
-
-    point.assignedStudents = point.assignedStudents.filter(
-      (s) => !(s.parentId === parentId && s.childId === childId),
-    );
-
-    await pickupDoc.save();
-
-    /*
-    =====================================
-    REDIS SYNC
-    =====================================
-    */
-
-    const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-    await redisClient.set(
-      redisKey,
-
-      JSON.stringify(pickupDoc.pickupPoints),
+      updatedPickup.pickupPoints,
     );
 
     return res.status(200).json({
       success: true,
-
-      message: "Student removed successfully",
-
-      data: pickupDoc,
+      code: "STUDENT_REMOVED_SUCCESSFULLY",
+      message:
+        "Student removed from pickup point and user assignment cleared successfully",
+      removedAssignment: {
+        schoolId,
+        busNumber,
+        pickupPointId,
+        parentId,
+        studentId,
+      },
+      databaseUpdate: {
+        pickupPointModified: true,
+        userAssignmentCleared: userUpdate.modifiedCount > 0,
+      },
+      redisSync: {
+        success: redisSynced,
+      },
+      data: updatedPickup,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("removeStudent:", error);
     return res.status(500).json({
       success: false,
-      message: "Server error",
+      code: "REMOVE_STUDENT_SERVER_ERROR",
+      message: "Server error while removing student from pickup point",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
     });
   }
 };
 
 /*
-=====================================
-4. REMOVE PICKUP POINT
-=====================================
+==================================================
+REMOVE PICKUP POINT
+One findOneAndUpdate and projected return
+==================================================
 */
-
 exports.removePickupPoint = async (req, res) => {
   try {
-    const { pickupPointId, busNumber } = req.body;
-    const { schoolId } = req.user;
-    if (!schoolId || !pickupPointId || !busNumber) {
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.body?.busNumber);
+    const pickupPointId = clean(req.body?.pickupPointId);
+
+    if (!schoolId || !busNumber || !pickupPointId) {
       return res.status(400).json({
         success: false,
-
         message: "schoolId, busNumber and pickupPointId required",
       });
     }
-
-    /*
-    =====================================
-    REMOVE PICKUP POINT
-    =====================================
-    */
 
     const updatedDoc = await PickupPoint.findOneAndUpdate(
       {
         schoolId,
         busNumber,
+        "pickupPoints.pickupPointId": pickupPointId,
       },
-
       {
-        $pull: {
-          pickupPoints: {
-            pickupPointId,
-          },
-        },
+        $pull: { pickupPoints: { pickupPointId } },
       },
-
       {
         new: true,
+        projection: {
+          _id: 1,
+          schoolId: 1,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: 1,
+        },
+        lean: true,
       },
     );
 
     if (!updatedDoc) {
       return res.status(404).json({
         success: false,
-
-        message: "Pickup document not found",
+        message: "Pickup point not found",
       });
     }
 
-    /*
-    =====================================
-    REDIS SYNC
-    =====================================
-    */
-
-    const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-    const formattedPickupPoints = updatedDoc.pickupPoints.map((point) => ({
-      pickupPointId: point.pickupPointId,
-
-      name: point.name,
-
-      location: {
-        lng: point.location.coordinates[0],
-
-        lat: point.location.coordinates[1],
-      },
-
-      radius: point.radius || 100,
-
-      assignedStudents: point.assignedStudents,
-    }));
-
-    await redisClient.set(
-      redisKey,
-
-      JSON.stringify(formattedPickupPoints),
-    );
-
-    console.log(`✅ Redis updated: ${redisKey}`);
+    await setPickupCache(schoolId, busNumber, updatedDoc.pickupPoints);
 
     return res.status(200).json({
       success: true,
-
       message: "Pickup point removed successfully",
-
       data: updatedDoc,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("removePickupPoint:", error);
     return res.status(500).json({
       success: false,
-
       message: "Server error",
     });
   }
 };
 
 /*
-=====================================
-5. ADD ADDITIONAL PICKUP POINT
-=====================================
+==================================================
+ADD ADDITIONAL PICKUP POINT
+Atomic duplicate-safe push; no initial full read
+==================================================
 */
-
 exports.addPickupPoint = async (req, res) => {
   try {
-    const { busNumber, pickupPoints } = req.body;
-    const { schoolId } = req.user;
-    if (!Array.isArray(pickupPoints) || !pickupPoints.length) {
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.body?.busNumber);
+    const pickupPoints = req.body?.pickupPoints;
+
+    if (!schoolId || !busNumber) {
       return res.status(400).json({
         success: false,
+        message: "schoolId and busNumber required",
+      });
+    }
 
+    if (!Array.isArray(pickupPoints) || pickupPoints.length === 0) {
+      return res.status(400).json({
+        success: false,
         message: "pickupPoints array required",
       });
     }
 
-    /*
-    =====================================
-    FORMAT POINTS
-    =====================================
-    */
-
-    const formattedPoints = pickupPoints.map((p) => ({
-      ...p,
-
-      pickupPointId: p.pickupPointId || `PP-${generateId()}`,
-
-      radius: p.radius || 100,
-
-      assignedStudents: Array.isArray(p.assignedStudents)
-        ? p.assignedStudents
-        : [],
-    }));
-
-    /*
-    =====================================
-    FIND DOCUMENT
-    =====================================
-    */
-
-    const pickupDoc = await PickupPoint.findOne({
-      schoolId,
-      busNumber,
+    const prepared = preparePickupPoints(pickupPoints, {
+      status: "PUBLISHED",
+      createdBy: "ADMIN",
+      lastModifiedBy: "Admin",
     });
 
-    if (!pickupDoc) {
-      return res.status(404).json({
-        success: false,
-
-        message: "Pickup document not found",
-      });
-    }
-
-    /*
-    =====================================
-    PREVENT DUPLICATES
-    =====================================
-    */
-
-    const existingIds = new Set(
-      pickupDoc.pickupPoints.map((p) => p.pickupPointId),
-    );
-
-    const newPoints = formattedPoints.filter(
-      (p) => !existingIds.has(p.pickupPointId),
-    );
-
-    if (!newPoints.length) {
-      return res.status(400).json({
-        success: false,
-
-        message: "Pickup points already exist",
-      });
-    }
-
-    /*
-    =====================================
-    UPDATE DOCUMENT
-    =====================================
-    */
+    const requestedIds = prepared.map((point) => point.pickupPointId);
 
     const updatedDoc = await PickupPoint.findOneAndUpdate(
       {
         schoolId,
         busNumber,
+        "pickupPoints.pickupPointId": { $nin: requestedIds },
       },
-
       {
-        $push: {
-          pickupPoints: {
-            $each: newPoints,
-          },
-        },
+        $push: { pickupPoints: { $each: prepared } },
       },
-
       {
         new: true,
+        projection: {
+          _id: 1,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: 1,
+        },
+        lean: true,
       },
     );
 
-    /*
-    =====================================
-    REDIS SYNC
-    =====================================
-    */
+    if (!updatedDoc) {
+      const exists = await PickupPoint.exists({ schoolId, busNumber });
 
-    const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-    await redisClient.set(
-      redisKey,
-
-      JSON.stringify(updatedDoc.pickupPoints),
-    );
-
-    return res.status(200).json({
-      success: true,
-
-      message: "Pickup points added successfully",
-
-      data: updatedDoc,
-    });
-  } catch (error) {
-    console.log(error);
-
-    return res.status(500).json({
-      success: false,
-
-      message: "Server error",
-    });
-  }
-};
-exports.editPickupPoint = async (req, res) => {
-  try {
-    const { busNumber, pickupPointId, name, radius, location } = req.body;
-
-    const { schoolId } = req.user;
-
-    /*
-    =====================================
-    FIND DOCUMENT
-    =====================================
-    */
-
-    const pickupDoc = await PickupPoint.findOne({
-      schoolId,
-      busNumber,
-    });
-
-    if (!pickupDoc) {
-      return res.status(404).json({
+      return res.status(exists ? 409 : 404).json({
         success: false,
-        message: "Pickup document not found",
+        message: exists
+          ? "One or more pickup points already exist"
+          : "Pickup document not found",
       });
     }
 
-    /*
-    =====================================
-    FIND PICKUP POINT
-    =====================================
-    */
+    await setPickupCache(schoolId, busNumber, updatedDoc.pickupPoints);
 
-    const pickupPoint = pickupDoc.pickupPoints.find(
-      (p) => p.pickupPointId === pickupPointId,
+    return res.status(200).json({
+      success: true,
+      message: "Pickup points added successfully",
+      data: updatedDoc,
+    });
+  } catch (error) {
+    console.error("addPickupPoint:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
+    });
+  }
+};
+
+/*
+==================================================
+EDIT PICKUP POINT
+Direct positional update; no read-modify-save
+==================================================
+*/
+exports.editPickupPoint = async (req, res) => {
+  try {
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.body?.busNumber);
+    const pickupPointId = clean(req.body?.pickupPointId);
+
+    if (!schoolId || !busNumber || !pickupPointId) {
+      return res.status(400).json({
+        success: false,
+        message: "schoolId, busNumber and pickupPointId required",
+      });
+    }
+
+    const set = {};
+
+    if (req.body.name !== undefined) {
+      set["pickupPoints.$.name"] = clean(req.body.name);
+    }
+
+    if (req.body.radius !== undefined) {
+      set["pickupPoints.$.radius"] = Number(req.body.radius);
+    }
+
+    if (req.body.location !== undefined) {
+      const coordinates = req.body.location?.coordinates;
+
+      if (
+        !Array.isArray(coordinates) ||
+        coordinates.length !== 2 ||
+        !coordinates.every(Number.isFinite)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Valid location coordinates [lng, lat] required",
+        });
+      }
+
+      set["pickupPoints.$.location"] = {
+        type: "Point",
+        coordinates,
+      };
+    }
+
+    if (Object.keys(set).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No editable values supplied",
+      });
+    }
+
+    const updatedDoc = await PickupPoint.findOneAndUpdate(
+      {
+        schoolId,
+        busNumber,
+        "pickupPoints.pickupPointId": pickupPointId,
+      },
+      { $set: set },
+      {
+        new: true,
+        projection: {
+          _id: 1,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: 1,
+        },
+        lean: true,
+      },
     );
 
-    if (!pickupPoint) {
+    if (!updatedDoc) {
       return res.status(404).json({
         success: false,
         message: "Pickup point not found",
       });
     }
 
-    /*
-    =====================================
-    UPDATE VALUES
-    =====================================
-    */
-
-    if (name) pickupPoint.name = name;
-
-    if (radius) pickupPoint.radius = radius;
-
-    if (location) pickupPoint.location = location;
-
-    await pickupDoc.save();
-
-    /*
-    =====================================
-    REDIS UPDATE
-    =====================================
-    */
-
-    const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-    await redisClient.set(redisKey, JSON.stringify(pickupDoc.pickupPoints));
+    await setPickupCache(schoolId, busNumber, updatedDoc.pickupPoints);
 
     return res.status(200).json({
       success: true,
       message: "Pickup point updated successfully",
-      data: pickupDoc,
+      data: updatedDoc,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("editPickupPoint:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
     });
   }
 };
+
+/*
+==================================================
+CHANGE BUS NUMBER
+No pre-read or duplicate lookup.
+Unique index handles duplicate bus number.
+Pipeline also updates nested student busNumber.
+==================================================
+*/
 exports.changeBusId = async (req, res) => {
   try {
-    const { oldBusNumber, newBusNumber } = req.body;
+    const schoolId = clean(req.user?.schoolId);
+    const oldBusNumber = cleanBus(req.body?.oldBusNumber);
+    const newBusNumber = cleanBus(req.body?.newBusNumber);
 
-    const { schoolId } = req.user;
-
-    /*
-    =====================================
-    VALIDATION
-    =====================================
-    */
-
-    if (!oldBusNumber || !newBusNumber) {
+    if (!schoolId || !oldBusNumber || !newBusNumber) {
       return res.status(400).json({
         success: false,
         message: "Old and new bus numbers are required",
       });
     }
 
-    /*
-    =====================================
-    FIND DOCUMENT
-    =====================================
-    */
+    const updatedDoc = await PickupPoint.findOneAndUpdate(
+      {
+        schoolId,
+        busNumber: oldBusNumber,
+      },
+      [
+        {
+          $set: {
+            busNumber: newBusNumber,
+            pickupPoints: {
+              $map: {
+                input: { $ifNull: ["$pickupPoints", []] },
+                as: "point",
+                in: {
+                  $mergeObjects: [
+                    "$$point",
+                    {
+                      assignedStudents: {
+                        $map: {
+                          input: {
+                            $ifNull: ["$$point.assignedStudents", []],
+                          },
+                          as: "assigned",
+                          in: {
+                            $mergeObjects: [
+                              "$$assigned",
+                              { busNumber: newBusNumber },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ],
+      {
+        new: true,
+        projection: {
+          _id: 1,
+          schoolId: 1,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: 1,
+        },
+        lean: true,
+      },
+    );
 
-    const pickupDoc = await PickupPoint.findOne({
-      schoolId,
-      busNumber: oldBusNumber,
-    });
-
-    if (!pickupDoc) {
+    if (!updatedDoc) {
       return res.status(404).json({
         success: false,
         message: "Pickup document not found",
       });
     }
 
-    /*
-    =====================================
-    CHECK NEW BUS EXISTS
-    =====================================
-    */
+    await Promise.all([
+      redisClient.del(redisKey(schoolId, oldBusNumber)),
+      setPickupCache(schoolId, newBusNumber, updatedDoc.pickupPoints),
+    ]);
 
-    const alreadyExists = await PickupPoint.findOne({
-      schoolId,
-      busNumber: newBusNumber,
+    return res.status(200).json({
+      success: true,
+      message: "Bus ID updated successfully",
+      data: updatedDoc,
     });
-
-    if (alreadyExists) {
-      return res.status(400).json({
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({
         success: false,
         message: "New bus number already exists",
       });
     }
 
-    /*
-    =====================================
-    UPDATE BUS NUMBER
-    =====================================
-    */
-
-    pickupDoc.busNumber = newBusNumber;
-
-    await pickupDoc.save();
-
-    /*
-    =====================================
-    REDIS UPDATE
-    =====================================
-    */
-
-    const oldRedisKey = `pickup_points:${schoolId}:${oldBusNumber}`;
-
-    const newRedisKey = `pickup_points:${schoolId}:${newBusNumber}`;
-
-    await redisClient.del(oldRedisKey);
-
-    await redisClient.set(
-      newRedisKey,
-
-      JSON.stringify(pickupDoc.pickupPoints),
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Bus ID updated successfully",
-      data: pickupDoc,
-    });
-  } catch (error) {
-    console.log(error);
-
+    console.error("changeBusId:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
     });
   }
 };
-/*
-========================================
-REMOVE COMPLETE BUS PICKUP POINTS
-========================================
-*/
 
+/*
+==================================================
+REMOVE COMPLETE BUS PICKUP DOCUMENT
+One findOneAndDelete only
+==================================================
+*/
 exports.removeCompleteBusPickupPoints = async (req, res) => {
   try {
-    const { busNumber } = req.body;
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.body?.busNumber);
 
-    const { schoolId } = req.user;
-
-    /*
-      ========================================
-      VALIDATION
-      ========================================
-      */
-
-    if (!busNumber) {
+    if (!schoolId || !busNumber) {
       return res.status(400).json({
         success: false,
-
         message: "Bus number is required",
       });
     }
 
-    /*
-      ========================================
-      FIND DOCUMENT
-      ========================================
-      */
+    const deleted = await PickupPoint.findOneAndDelete(
+      { schoolId, busNumber },
+      { projection: { _id: 1 } },
+    ).lean();
 
-    const pickupDoc = await PickupPoint.findOne({
-      schoolId,
-      busNumber,
-    });
-
-    if (!pickupDoc) {
+    if (!deleted) {
       return res.status(404).json({
         success: false,
-
         message: "Pickup document not found",
       });
     }
 
-    /*
-      ========================================
-      DELETE DOCUMENT
-      ========================================
-      */
-
-    await PickupPoint.findOneAndDelete({
-      schoolId,
-      busNumber,
-    });
-
-    /*
-      ========================================
-      REMOVE REDIS CACHE
-      ========================================
-      */
-
-    const redisKey = `pickup_points:${schoolId}:${busNumber}`;
-
-    await redisClient.del(redisKey);
-
-    /*
-      ========================================
-      RESPONSE
-      ========================================
-      */
+    await redisClient.del(redisKey(schoolId, busNumber));
 
     return res.status(200).json({
       success: true,
-
       message: "Complete bus pickup points removed successfully",
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("removeCompleteBusPickupPoints:", error);
     return res.status(500).json({
       success: false,
-
       message: "Server error",
     });
   }
 };
 
 /*
-========================================
-GET ALL BUSES WITH PICKUP POINTS
-BUS PAGINATION + DEFAULT 5 PICKUP POINTS
-========================================
+==================================================
+GET PAGINATED BUSES
+One aggregation with $facet instead of
+countDocuments + find.
+Pickup slicing happens inside MongoDB.
+==================================================
 */
-
 exports.getPaginatedBusesWithPickupPoints = async (req, res) => {
   try {
-    /*
-      ========================================
-      QUERY PARAMS
-      ========================================
-      */
-
-    const page = Number(req.query.page) || 1;
-
-    const limit = Number(req.query.limit) || 5;
-
-    const pickupPointLimit = Number(req.query.pickupPointLimit) || 5;
-
-    const search = req.query.search || "";
-
+    const schoolId = clean(req.user?.schoolId);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number(req.query.limit) || 5, 1),
+      100,
+    );
+    const pickupPointLimit = Math.min(
+      Math.max(Number(req.query.pickupPointLimit) || 5, 1),
+      100,
+    );
+    const search = cleanBus(req.query.search);
     const skip = (page - 1) * limit;
 
-    const { schoolId } = req.user;
-
-    /*
-      ========================================
-      FILTER
-      ========================================
-      */
-
-    const filter = {
-      schoolId,
-    };
+    const match = { schoolId };
 
     if (search) {
-      filter.busNumber = {
-        $regex: search,
-        $options: "i",
+      match.busNumber = {
+        $regex: `^${escapeRegex(search)}`,
       };
     }
 
-    /*
-      ========================================
-      TOTAL BUSES
-      ========================================
-      */
+    const [result] = await PickupPoint.aggregate([
+      { $match: match },
+      {
+        $facet: {
+          metadata: [{ $count: "totalBuses" }],
+          data: [
+            { $sort: { createdAt: -1, _id: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 1,
+                busNumber: 1,
+                createdAt: 1,
+                totalPickupPoints: {
+                  $size: { $ifNull: ["$pickupPoints", []] },
+                },
+                pickupPoints: {
+                  $slice: [
+                    { $ifNull: ["$pickupPoints", []] },
+                    pickupPointLimit,
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      },
+      {
+        $project: {
+          totalBuses: {
+            $ifNull: [
+              { $arrayElemAt: ["$metadata.totalBuses", 0] },
+              0,
+            ],
+          },
+          data: 1,
+        },
+      },
+    ]).option({ maxTimeMS: 3000 });
 
-    const totalBuses = await PickupPoint.countDocuments(filter);
-
-    /*
-      ========================================
-      GET BUSES
-      ========================================
-      */
-
-    const buses = await PickupPoint.find(filter)
-
-      .sort({
-        createdAt: -1,
-      })
-
-      .skip(skip)
-
-      .limit(limit)
-
-      .lean();
-
-    /*
-      ========================================
-      FORMAT RESPONSE
-      ========================================
-      */
-
-    const formattedData = buses.map((bus) => ({
-      _id: bus._id,
-
-      busNumber: bus.busNumber,
-
-      totalPickupPoints: bus.pickupPoints?.length || 0,
-
-      pickupPoints: bus.pickupPoints.slice(0, pickupPointLimit),
-
+    const totalBuses = result?.totalBuses || 0;
+    const data = (result?.data || []).map((bus) => ({
+      ...bus,
       pickupPointPagination: {
         currentPage: 1,
-
         limit: pickupPointLimit,
-
-        totalPickupPoints: bus.pickupPoints?.length || 0,
-
+        totalPickupPoints: bus.totalPickupPoints,
         totalPages: Math.ceil(
-          (bus.pickupPoints?.length || 0) / pickupPointLimit,
+          bus.totalPickupPoints / pickupPointLimit,
         ),
       },
-
-      createdAt: bus.createdAt,
     }));
-
-    /*
-      ========================================
-      RESPONSE
-      ========================================
-      */
 
     return res.status(200).json({
       success: true,
-
       message: "Buses fetched successfully",
-
-      data: formattedData,
-
+      data,
       pagination: {
         currentPage: page,
-
         limit,
-
         totalBuses,
-
         totalPages: Math.ceil(totalBuses / limit),
       },
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("getPaginatedBusesWithPickupPoints:", error);
     return res.status(500).json({
       success: false,
-
       message: "Server Error",
     });
   }
 };
 
+/*
+==================================================
+GET PICKUP POINT BY ID
+MongoDB extracts only matching embedded point
+==================================================
+*/
 exports.getPickupPointById = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { schoolId } = req.user;
+    const schoolId = clean(req.user?.schoolId);
+    const pickupPointId = clean(req.params?.id);
 
-    const pickupDocument = await PickupPoint.findOne({
-      schoolId,
-      "pickupPoints.pickupPointId": id,
-    }).lean();
+    const [result] = await PickupPoint.aggregate([
+      {
+        $match: {
+          schoolId,
+          "pickupPoints.pickupPointId": pickupPointId,
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          pickupPoint: {
+            $arrayElemAt: [
+              {
+                $filter: {
+                  input: "$pickupPoints",
+                  as: "point",
+                  cond: {
+                    $eq: [
+                      "$$point.pickupPointId",
+                      pickupPointId,
+                    ],
+                  },
+                },
+              },
+              0,
+            ],
+          },
+        },
+      },
+    ]).option({ maxTimeMS: 2000 });
 
-    if (!pickupDocument) {
+    if (!result?.pickupPoint) {
       return res.status(404).json({
         success: false,
         message: "Pickup point not found",
       });
     }
 
-    const pickupPoint = pickupDocument.pickupPoints.find(
-      (point) => point.pickupPointId === id,
-    );
-
     return res.status(200).json({
       success: true,
       message: "Pickup point fetched successfully",
-      data: pickupPoint,
+      data: result.pickupPoint,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("getPickupPointById:", error);
     return res.status(500).json({
       success: false,
       message: "Server Error",
     });
   }
 };
-/*
-========================================
-GET PICKUP POINTS UNDER BUS
-PICKUP POINT PAGINATION
-========================================
-*/
 
+/*
+==================================================
+ADMIN GET PICKUP POINTS BY BUS
+MongoDB reverses and slices embedded array.
+Only requested page crosses the network.
+==================================================
+*/
 exports.admin_getPickupPointsByBus = async (req, res) => {
   try {
-    /*
-      ========================================
-      QUERY PARAMS
-      ========================================
-      */
-
-    const page = Number(req.query.page) || 1;
-
-    const limit = Number(req.query.limit) || 5;
-
+    const schoolId = clean(req.user?.schoolId);
+    const busNumber = cleanBus(req.params?.busNumber);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number(req.query.limit) || 5, 1),
+      100,
+    );
     const skip = (page - 1) * limit;
 
-    const { busNumber } = req.params;
+    const [result] = await PickupPoint.aggregate([
+      {
+        $match: {
+          schoolId,
+          busNumber,
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          busNumber: 1,
+          totalPickupPoints: {
+            $size: { $ifNull: ["$pickupPoints", []] },
+          },
+          pickupPoints: {
+            $slice: [
+              {
+                $reverseArray: {
+                  $ifNull: ["$pickupPoints", []],
+                },
+              },
+              skip,
+              limit,
+            ],
+          },
+        },
+      },
+    ]).option({ maxTimeMS: 2000 });
 
-    const { schoolId } = req.user;
-
-    /*
-      ========================================
-      FIND BUS DOCUMENT
-      ========================================
-      */
-
-    const pickupDoc = await PickupPoint.findOne({
-      schoolId,
-      busNumber,
-    }).lean();
-
-    if (!pickupDoc) {
+    if (!result) {
       return res.status(404).json({
         success: false,
-
         message: "Bus pickup points not found",
       });
     }
 
-    /*
-      ========================================
-      TOTAL PICKUP POINTS
-      ========================================
-      */
-
-    const totalPickupPoints = pickupDoc.pickupPoints?.length || 0;
-
-    /*
-      ========================================
-      REVERSE ORDER
-      LATEST PICKUP POINT FIRST
-      ========================================
-      */
-
-    const reversedPickupPoints = [...pickupDoc.pickupPoints].reverse();
-
-    /*
-      ========================================
-      PAGINATED PICKUP POINTS
-      ========================================
-      */
-
-    const paginatedPickupPoints = reversedPickupPoints.slice(
-      skip,
-      skip + limit,
-    );
-
-    /*
-      ========================================
-      RESPONSE
-      ========================================
-      */
-
     return res.status(200).json({
       success: true,
-
       message: "Pickup points fetched successfully",
-
       data: {
-        busNumber: pickupDoc.busNumber,
-
-        pickupPoints: paginatedPickupPoints,
+        busNumber: result.busNumber,
+        pickupPoints: result.pickupPoints,
       },
-
       pagination: {
         currentPage: page,
-
         limit,
-
-        totalPickupPoints,
-
-        totalPages: Math.ceil(totalPickupPoints / limit),
+        totalPickupPoints: result.totalPickupPoints,
+        totalPages: Math.ceil(
+          result.totalPickupPoints / limit,
+        ),
       },
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("admin_getPickupPointsByBus:", error);
     return res.status(500).json({
       success: false,
-
       message: "Server Error",
     });
   }
 };
 
+/*
+==================================================
+DRIVER GET PICKUP POINTS WITH ASSIGNED FAMILIES
+One aggregation round trip.
+==================================================
+*/
 exports.driver_getPickupPointsByBus = async (req, res) => {
+  const apiStart = performance.now();
+
   try {
-    const { busNumber } = req.params;
-    const schoolId = req.schoolId;
+    const schoolId = clean(req.schoolId);
+    const busNumber = cleanBus(req.params?.busNumber);
 
-    const page = req.query.page ? Number(req.query.page) : null;
-    const limit = req.query.limit ? Number(req.query.limit) : null;
+    if (!schoolId || !busNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "School ID and bus number are required",
+      });
+    }
 
-    const pickupDoc = await PickupPoint.findOne({
-      schoolId,
-      busNumber,
-    }).lean();
+    const dbStart = performance.now();
 
-    if (!pickupDoc) {
+    const [result] = await PickupPoint.aggregate([
+      {
+        $match: {
+          schoolId,
+          busNumber,
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          schoolId: 1,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: {
+            $reverseArray: {
+              $ifNull: ["$pickupPoints", []],
+            },
+          },
+        },
+      },
+      {
+        $unwind: {
+          path: "$pickupPoints",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: User.collection.name,
+          let: {
+            pickupSchoolId: "$schoolId",
+            assignedStudents: {
+              $ifNull: [
+                "$pickupPoints.assignedStudents",
+                [],
+              ],
+            },
+            assignedParentIds: {
+              $map: {
+                input: {
+                  $ifNull: [
+                    "$pickupPoints.assignedStudents",
+                    [],
+                  ],
+                },
+                as: "assigned",
+                in: "$$assigned.parentId",
+              },
+            },
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    {
+                      $eq: [
+                        "$schoolId",
+                        "$$pickupSchoolId",
+                      ],
+                    },
+                    {
+                      $eq: ["$status.active", true],
+                    },
+                    {
+                      $in: [
+                        "$parentId",
+                        "$$assignedParentIds",
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                parentId: 1,
+                parent: {
+                  name: {
+                    $ifNull: ["$parent.name", ""],
+                  },
+                  phone: {
+                    $ifNull: ["$parent.phone", ""],
+                  },
+                },
+                children: {
+                  $map: {
+                    input: {
+                      $filter: {
+                        input: {
+                          $ifNull: ["$children", []],
+                        },
+                        as: "child",
+                        cond: {
+                          $and: [
+                            {
+                              $eq: [
+                                "$$child.status.active",
+                                true,
+                              ],
+                            },
+                            {
+                              $gt: [
+                                {
+                                  $size: {
+                                    $filter: {
+                                      input:
+                                        "$$assignedStudents",
+                                      as: "assigned",
+                                      cond: {
+                                        $and: [
+                                          {
+                                            $eq: [
+                                              "$$assigned.parentId",
+                                              "$parentId",
+                                            ],
+                                          },
+                                          {
+                                            $eq: [
+                                              "$$assigned.studentId",
+                                              "$$child.studentId",
+                                            ],
+                                          },
+                                        ],
+                                      },
+                                    },
+                                  },
+                                },
+                                0,
+                              ],
+                            },
+                          ],
+                        },
+                      },
+                    },
+                    as: "child",
+                    in: {
+                      studentId: "$$child.studentId",
+                      name: {
+                        $ifNull: ["$$child.name", ""],
+                      },
+                      class: {
+                        $ifNull: ["$$child.class", ""],
+                      },
+                      section: {
+                        $ifNull: ["$$child.section", ""],
+                      },
+                      rollNumber: {
+                        $ifNull: [
+                          "$$child.rollNumber",
+                          "",
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            {
+              $match: {
+                "children.0": { $exists: true },
+              },
+            },
+          ],
+          as: "assignedParentDetails",
+        },
+      },
+      {
+        $set: {
+          "pickupPoints.assignedStudents":
+            "$assignedParentDetails",
+        },
+      },
+      {
+        $unset: [
+          "assignedParentDetails",
+          "pickupPoints._id",
+          "pickupPoints.assignedStudents._id",
+        ],
+      },
+      {
+        $group: {
+          _id: null,
+          busNumber: { $first: "$busNumber" },
+          radius: { $first: "$radius" },
+          pickupPoints: { $push: "$pickupPoints" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          busNumber: 1,
+          radius: 1,
+          pickupPoints: {
+            $filter: {
+              input: "$pickupPoints",
+              as: "point",
+              cond: { $ne: ["$$point", null] },
+            },
+          },
+        },
+      },
+    ]).option({ maxTimeMS: 3000 });
+
+    const dbTime = performance.now() - dbStart;
+
+    if (!result) {
       return res.status(404).json({
         success: false,
         message: "Bus pickup points not found",
       });
     }
 
-    const totalPickupPoints = pickupDoc.pickupPoints?.length || 0;
+    const apiTime = performance.now() - apiStart;
 
-    const reversedPickupPoints = [...(pickupDoc.pickupPoints || [])].reverse();
-
-    let pickupPoints = reversedPickupPoints;
-    let pagination = null;
-
-    if (page && limit) {
-      const skip = (page - 1) * limit;
-
-      pickupPoints = reversedPickupPoints.slice(skip, skip + limit);
-
-      pagination = {
-        currentPage: page,
-        limit,
-        totalPickupPoints,
-        totalPages: Math.ceil(totalPickupPoints / limit),
-      };
-    }
+    res.setHeader(
+      "X-Database-Time",
+      `${dbTime.toFixed(2)}ms`,
+    );
+    res.setHeader(
+      "X-API-Time",
+      `${apiTime.toFixed(2)}ms`,
+    );
 
     return res.status(200).json({
       success: true,
       message: "Pickup points fetched successfully",
-      data: {
-        busNumber: pickupDoc.busNumber,
-        pickupPoints,
-       radius: pickupDoc.radius
-      },
-      pagination,
+      data: result,
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("driver_getPickupPointsByBus:", error);
     return res.status(500).json({
       success: false,
-      message: "Server Error",
+      message: "Server error",
     });
   }
 };

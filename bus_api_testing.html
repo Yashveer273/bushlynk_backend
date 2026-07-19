@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Bus API Tester</title>
+
+  <style>
+    :root {
+      --bg: #08101f;
+      --sidebar: #0d1628;
+      --panel: #111b30;
+      --panel-2: #17233d;
+      --border: #263654;
+      --text: #edf4ff;
+      --muted: #92a3c7;
+      --blue: #5d8cff;
+      --blue-2: #3d6cf4;
+      --green: #2dd48f;
+      --red: #ff6b7d;
+      --yellow: #ffc857;
+      --input: #0b1426;
+      --shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, Arial, sans-serif;
+      background:
+        radial-gradient(
+          circle at top right,
+          rgba(93, 140, 255, 0.15),
+          transparent 28%
+        ),
+        var(--bg);
+      color: var(--text);
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 20px 14px;
+      overflow-y: auto;
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+    }
+
+    .brand {
+      margin-bottom: 16px;
+      padding: 0 8px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 21px;
+    }
+
+    .brand p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .menu-section {
+      margin-bottom: 20px;
+    }
+
+    .menu-title {
+      padding: 0 8px 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.9px;
+    }
+
+    .api-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .api-item {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid transparent;
+      border-radius: 11px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .api-item:hover {
+      background: var(--panel-2);
+      border-color: var(--border);
+    }
+
+    .api-item.active {
+      background: rgba(93, 140, 255, 0.16);
+      border-color: rgba(93, 140, 255, 0.55);
+    }
+
+    .api-item-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+
+    .api-method {
+      min-width: 50px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .get {
+      background: rgba(45, 212, 143, 0.14);
+      color: var(--green);
+    }
+
+    .post {
+      background: rgba(93, 140, 255, 0.16);
+      color: #8fb0ff;
+    }
+
+    .put {
+      background: rgba(255, 200, 87, 0.14);
+      color: var(--yellow);
+    }
+
+    .delete {
+      background: rgba(255, 107, 125, 0.14);
+      color: var(--red);
+    }
+
+    .api-name {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .api-path-small {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.4;
+      word-break: break-all;
+    }
+
+    .main {
+      padding: 22px;
+      overflow-x: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .topbar h2 {
+      margin: 0;
+      font-size: 25px;
+    }
+
+    .topbar p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .save-btn,
+    .send-btn,
+    .soft-btn {
+      padding: 11px 15px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .save-btn,
+    .soft-btn {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+    }
+
+    .send-btn {
+      position: relative;
+      min-width: 125px;
+      overflow: hidden;
+      border: 0;
+      background: linear-gradient(135deg, var(--blue), var(--blue-2));
+      color: white;
+    }
+
+    .send-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+
+    .send-btn.loading {
+      padding-left: 42px;
+    }
+
+    .send-btn.loading::before {
+      content: "";
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      width: 15px;
+      height: 15px;
+      margin-top: -9px;
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .settings-card,
+    .request-card,
+    .response-card {
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(17, 27, 48, 0.97);
+      box-shadow: var(--shadow);
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 15px 17px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .card-head h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .card-body {
+      padding: 17px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 13px;
+    }
+
+    .dynamic-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 13px;
+      margin-bottom: 13px;
+    }
+
+    .field {
+      margin-bottom: 13px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      color: #c9d5ef;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      outline: none;
+      background: var(--input);
+      color: var(--text);
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(93, 140, 255, 0.12);
+    }
+
+    textarea {
+      min-height: 245px;
+      resize: vertical;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .request-line {
+      display: grid;
+      grid-template-columns: 110px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .method-select {
+      font-weight: 900;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .seed-note {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px dashed rgba(93, 140, 255, 0.35);
+      border-radius: 10px;
+      background: rgba(93, 140, 255, 0.08);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 13px;
+    }
+
+    .stat {
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--panel-2);
+    }
+
+    .stat small {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+    }
+
+    .stat strong {
+      font-size: 15px;
+      word-break: break-word;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 11px;
+    }
+
+    .tab {
+      padding: 8px 11px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel-2);
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .tab.active {
+      border-color: var(--blue);
+      background: rgba(93, 140, 255, 0.16);
+      color: white;
+    }
+
+    pre {
+      min-height: 360px;
+      max-height: 600px;
+      margin: 0;
+      padding: 15px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: #07101e;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .ok {
+      color: var(--green);
+    }
+
+    .bad {
+      color: var(--red);
+    }
+
+    .warn {
+      color: var(--yellow);
+    }
+
+    @media (max-width: 800px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: relative;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .api-menu {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .grid-2,
+      .dynamic-grid,
+      .request-line {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .main {
+        padding: 14px;
+      }
+
+      .api-menu,
+      .stats {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>Bus APIs</h1>
+        <p>
+          Each API only shows the fields required by that specific endpoint.
+        </p>
+      </div>
+
+      <div id="apiMenuContainer"></div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h2 id="selectedApiTitle">Bus API Tester</h2>
+          <p id="selectedApiDescription">
+            Select an API from the left menu.
+          </p>
+        </div>
+
+        <button id="saveSettingsBtn" class="save-btn">
+          Save Base URL & Token
+        </button>
+      </div>
+
+      <section class="settings-card">
+        <div class="card-head">
+          <h3>Common Settings</h3>
+          <span id="saveState" class="warn">Not saved</span>
+        </div>
+
+        <div class="card-body">
+          <div class="grid-2">
+            <div class="field">
+              <label for="baseUrl">Base URL</label>
+              <input
+                id="baseUrl"
+                value="http://192.168.1.7:3000/api/bus"
+              />
+            </div>
+
+            <div class="field">
+              <label for="token">School Token</label>
+              <input
+                id="token"
+                type="password"
+                placeholder="Paste token without Bearer"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="request-card">
+        <div class="card-head">
+          <h3>Editable Request</h3>
+          <span id="requestState" class="warn">Ready</span>
+        </div>
+
+        <div class="card-body">
+          <div id="dynamicFields" class="dynamic-grid"></div>
+
+          <div class="request-line">
+            <select id="method" class="method-select">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>DELETE</option>
+            </select>
+
+            <input id="path" />
+
+            <button id="sendBtn" class="send-btn">
+              Send API
+            </button>
+          </div>
+
+          <div class="field">
+            <label for="requestBody">Request Body — Editable</label>
+            <textarea id="requestBody" spellcheck="false">{}</textarea>
+          </div>
+
+          <div class="actions">
+            <button id="reloadSeedBtn" class="soft-btn">
+              Reload Seed Data
+            </button>
+
+            <button id="formatBtn" class="soft-btn">
+              Format JSON
+            </button>
+
+            <button id="copyCurlBtn" class="soft-btn">
+              Copy cURL
+            </button>
+
+            <button id="clearResponseBtn" class="soft-btn">
+              Clear Response
+            </button>
+          </div>
+
+          <div class="seed-note">
+            Register Bus shows only busNumber and busAsignNumber.
+            Assign Driver shows only busNumber and driverId.
+            No Mongo Object ID input is used anywhere.
+          </div>
+        </div>
+      </section>
+
+      <section class="response-card">
+        <div class="card-head">
+          <h3>Response</h3>
+          <span id="responseState" class="warn">No request sent</span>
+        </div>
+
+        <div class="card-body">
+          <div class="stats">
+            <div class="stat">
+              <small>Status</small>
+              <strong id="statusValue">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>Total Time</small>
+              <strong id="totalTimeValue">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>Database Time</small>
+              <strong id="databaseTimeValue">-</strong>
+            </div>
+
+            <div class="stat">
+              <small>API Time</small>
+              <strong id="apiTimeValue">-</strong>
+            </div>
+          </div>
+
+          <div class="tabs">
+            <button class="tab active" data-tab="response">
+              Response
+            </button>
+
+            <button class="tab" data-tab="headers">
+              Headers
+            </button>
+
+            <button class="tab" data-tab="curl">
+              cURL
+            </button>
+          </div>
+
+          <pre id="responseOutput">{}</pre>
+          <pre id="headersOutput" class="hidden">{}</pre>
+          <pre id="curlOutput" class="hidden"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const apiGroups = [
+      {
+        title: "Bus Management",
+        items: [
+          {
+            id: "register-bus",
+            name: "Register Bus",
+            description:
+              "Register a bus. Only busNumber and busAsignNumber are required.",
+            method: "POST",
+            path: "/register",
+            fields: [
+              {
+                key: "busNumber",
+                label: "Bus Number",
+                value: "UP15AB1234",
+              },
+              {
+                key: "busAsignNumber",
+                label: "Bus Assign Number",
+                value: "BUS-101",
+              },
+            ],
+            body(values) {
+              return {
+                busNumber: values.busNumber,
+                busAsignNumber: values.busAsignNumber,
+              };
+            },
+          },
+          {
+            id: "assign-driver",
+            name: "Assign Default Driver",
+            description:
+              "Assign a driver. Only busNumber and driverId are required.",
+            method: "POST",
+            path: "/assign-default-driver",
+            fields: [
+              {
+                key: "busNumber",
+                label: "Bus Number",
+                value: "UP15AB1234",
+              },
+              {
+                key: "driverId",
+                label: "Driver ID",
+                value: "DRV-12345",
+              },
+            ],
+            body(values) {
+              return {
+                busNumber: values.busNumber,
+                driverId: values.driverId,
+              };
+            },
+          },
+          {
+            id: "get-all",
+            name: "Get All Buses",
+            description:
+              "Get all school buses. No request body is required.",
+            method: "GET",
+            path: "/all",
+            fields: [],
+            body() {
+              return null;
+            },
+          },
+          {
+            id: "edit-bus",
+            name: "Edit Bus",
+            description:
+              "Find bus using currentBusNumber and update required values.",
+            method: "PUT",
+            path: "/editBus",
+            fields: [
+              {
+                key: "currentBusNumber",
+                label: "Current Bus Number",
+                value: "UP15AB1234",
+              },
+              {
+                key: "newBusNumber",
+                label: "New Bus Number",
+                value: "UP15AB9999",
+              },
+              {
+                key: "busAsignNumber",
+                label: "New Bus Assign Number",
+                value: "BUS-202",
+              },
+            ],
+            body(values) {
+              const body = {
+                currentBusNumber: values.currentBusNumber,
+              };
+
+              if (values.newBusNumber) {
+                body.newBusNumber = values.newBusNumber;
+              }
+
+              if (values.busAsignNumber) {
+                body.busAsignNumber = values.busAsignNumber;
+              }
+
+              return body;
+            },
+          },
+          {
+            id: "remove-bus",
+            name: "Remove Bus",
+            description:
+              "Remove a bus using busNumber. Mongo Object ID is not required.",
+            method: "DELETE",
+            path: "/removeBus",
+            fields: [
+              {
+                key: "busNumber",
+                label: "Bus Number",
+                value: "UP15AB1234",
+              },
+            ],
+            body(values) {
+              return {
+                busNumber: values.busNumber,
+              };
+            },
+          },
+        ],
+      },
+      {
+        title: "Bus Route",
+        items: [
+          {
+            id: "next-pickup",
+            name: "Next Pickup Point",
+            description:
+              "Get next pickup point using busNumber.",
+            method: "GET",
+            path: "/next-pickup-point",
+            fields: [
+              {
+                key: "busNumber",
+                label: "Bus Number",
+                value: "UP15AB1234",
+              },
+            ],
+            query(values) {
+              return `?busNumber=${encodeURIComponent(
+                values.busNumber,
+              )}`;
+            },
+            body() {
+              return null;
+            },
+          },
+        ],
+      },
+    ];
+
+    const allApis = apiGroups.flatMap((group) => group.items);
+    let selectedApi = allApis[0];
+
+    const $ = (id) => document.getElementById(id);
+
+    function methodClass(method) {
+      return method.toLowerCase();
+    }
+
+    function buildMenu() {
+      const container = $("apiMenuContainer");
+      container.innerHTML = "";
+
+      apiGroups.forEach((group) => {
+        const section = document.createElement("section");
+        section.className = "menu-section";
+
+        const title = document.createElement("div");
+        title.className = "menu-title";
+        title.textContent = group.title;
+
+        const menu = document.createElement("div");
+        menu.className = "api-menu";
+
+        group.items.forEach((api) => {
+          const button = document.createElement("button");
+          button.className = "api-item";
+          button.dataset.apiId = api.id;
+
+          button.innerHTML = `
+            <div class="api-item-top">
+              <span class="api-method ${methodClass(api.method)}">
+                ${api.method}
+              </span>
+              <span class="api-name">${api.name}</span>
+            </div>
+            <div class="api-path-small">${api.path}</div>
+          `;
+
+          button.addEventListener("click", () => {
+            selectApi(api.id);
+          });
+
+          menu.appendChild(button);
+        });
+
+        section.appendChild(title);
+        section.appendChild(menu);
+        container.appendChild(section);
+      });
+    }
+
+    function getDynamicValues() {
+      const values = {};
+
+      document
+        .querySelectorAll("[data-field-key]")
+        .forEach((input) => {
+          values[input.dataset.fieldKey] = input.value.trim();
+        });
+
+      return values;
+    }
+
+    function renderDynamicFields() {
+      const container = $("dynamicFields");
+      container.innerHTML = "";
+
+      if (!selectedApi.fields.length) {
+        const empty = document.createElement("div");
+        empty.className = "seed-note";
+        empty.style.gridColumn = "1 / -1";
+        empty.textContent =
+          "This API does not require any input fields.";
+        container.appendChild(empty);
+        return;
+      }
+
+      selectedApi.fields.forEach((field) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "field";
+
+        const label = document.createElement("label");
+        label.textContent = field.label;
+
+        const input = document.createElement("input");
+        input.value = field.value || "";
+        input.dataset.fieldKey = field.key;
+
+        input.addEventListener("input", refreshRequestBody);
+
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
+        container.appendChild(wrapper);
+      });
+    }
+
+    function refreshRequestBody() {
+      const values = getDynamicValues();
+      const body = selectedApi.body(values);
+
+      $("requestBody").value = body
+        ? JSON.stringify(body, null, 2)
+        : "{}";
+
+      updateCurlPreview();
+    }
+
+    function selectApi(apiId) {
+      selectedApi =
+        allApis.find((api) => api.id === apiId) || allApis[0];
+
+      document.querySelectorAll(".api-item").forEach((item) => {
+        item.classList.toggle(
+          "active",
+          item.dataset.apiId === selectedApi.id,
+        );
+      });
+
+      $("selectedApiTitle").textContent =
+        `${selectedApi.method} — ${selectedApi.name}`;
+
+      $("selectedApiDescription").textContent =
+        selectedApi.description;
+
+      $("method").value = selectedApi.method;
+      $("path").value = selectedApi.path;
+
+      renderDynamicFields();
+      refreshRequestBody();
+    }
+
+    function normalizeBaseUrl(url) {
+      return url.trim().replace(/\/+$/, "");
+    }
+
+    function parseRequestBody() {
+      const raw = $("requestBody").value.trim();
+
+      if (!raw || raw === "{}") {
+        return null;
+      }
+
+      return JSON.parse(raw);
+    }
+
+    function buildFinalPath() {
+      const values = getDynamicValues();
+      const basePath = $("path").value.startsWith("/")
+        ? $("path").value
+        : `/${$("path").value}`;
+
+      return selectedApi.query
+        ? `${basePath}${selectedApi.query(values)}`
+        : basePath;
+    }
+
+    function buildCurl() {
+      const baseUrl = normalizeBaseUrl($("baseUrl").value);
+      const path = buildFinalPath();
+      const token = $("token").value.trim() || "<TOKEN>";
+      const method = $("method").value;
+
+      let curl =
+        `curl -X ${method} "${baseUrl}${path}"` +
+        ` \\\n  -H "Authorization: Bearer ${token}"` +
+        ` \\\n  -H "Accept: application/json"`;
+
+      try {
+        const body = parseRequestBody();
+
+        if (
+          body &&
+          method !== "GET" &&
+          method !== "HEAD"
+        ) {
+          curl +=
+            ` \\\n  -H "Content-Type: application/json"` +
+            ` \\\n  -d '${JSON.stringify(body).replace(
+              /'/g,
+              "'\\''",
+            )}'`;
+        }
+      } catch (_) {}
+
+      return curl;
+    }
+
+    function updateCurlPreview() {
+      $("curlOutput").textContent = buildCurl();
+    }
+
+    function saveSettings() {
+      localStorage.setItem(
+        "busApiTesterSettingsV2",
+        JSON.stringify({
+          baseUrl: $("baseUrl").value,
+          token: $("token").value,
+        }),
+      );
+
+      $("saveState").textContent = "Saved";
+      $("saveState").className = "ok";
+    }
+
+    function loadSettings() {
+      try {
+        const settings = JSON.parse(
+          localStorage.getItem("busApiTesterSettingsV2") ||
+            "{}",
+        );
+
+        if (settings.baseUrl) {
+          $("baseUrl").value = settings.baseUrl;
+        }
+
+        if (settings.token) {
+          $("token").value = settings.token;
+        }
+      } catch (_) {}
+    }
+
+    async function sendRequest() {
+      const baseUrl = normalizeBaseUrl($("baseUrl").value);
+      const token = $("token").value.trim();
+      const method = $("method").value;
+      const path = buildFinalPath();
+
+      if (!baseUrl) {
+        alert("Base URL is required");
+        return;
+      }
+
+      if (!token) {
+        alert("Token is required");
+        return;
+      }
+
+      let body = null;
+
+      try {
+        body = parseRequestBody();
+      } catch (error) {
+        alert(`Invalid JSON body: ${error.message}`);
+        return;
+      }
+
+      const options = {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      };
+
+      if (
+        body &&
+        method !== "GET" &&
+        method !== "HEAD"
+      ) {
+        options.headers["Content-Type"] = "application/json";
+        options.body = JSON.stringify(body);
+      }
+
+      $("sendBtn").disabled = true;
+      $("sendBtn").classList.add("loading");
+      $("sendBtn").textContent = "Processing...";
+      $("requestState").textContent = "Sending...";
+      $("requestState").className = "warn";
+      $("responseState").textContent = "Waiting...";
+      $("responseState").className = "warn";
+
+      const start = performance.now();
+
+      try {
+        const response = await fetch(
+          `${baseUrl}${path}`,
+          options,
+        );
+
+        const responseText = await response.text();
+        const elapsed = performance.now() - start;
+
+        let parsed;
+
+        try {
+          parsed = JSON.parse(responseText);
+        } catch (_) {
+          parsed = responseText;
+        }
+
+        const headers = {};
+
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+
+        $("statusValue").textContent =
+          `${response.status} ${response.statusText}`;
+
+        $("statusValue").className =
+          response.ok ? "ok" : "bad";
+
+        $("totalTimeValue").textContent =
+          `${elapsed.toFixed(2)} ms`;
+
+        $("databaseTimeValue").textContent =
+          response.headers.get("x-database-time") || "-";
+
+        $("apiTimeValue").textContent =
+          response.headers.get("x-api-time") || "-";
+
+        $("responseOutput").textContent =
+          typeof parsed === "string"
+            ? parsed
+            : JSON.stringify(parsed, null, 2);
+
+        $("headersOutput").textContent =
+          JSON.stringify(headers, null, 2);
+
+        $("responseState").textContent =
+          response.ok ? "Completed" : "Failed";
+
+        $("responseState").className =
+          response.ok ? "ok" : "bad";
+      } catch (error) {
+        const elapsed = performance.now() - start;
+
+        $("statusValue").textContent =
+          "Network/CORS error";
+
+        $("statusValue").className = "bad";
+
+        $("totalTimeValue").textContent =
+          `${elapsed.toFixed(2)} ms`;
+
+        $("databaseTimeValue").textContent = "-";
+        $("apiTimeValue").textContent = "-";
+
+        $("responseOutput").textContent = JSON.stringify(
+          {
+            success: false,
+            message: error.message,
+            checks: [
+              "Confirm Node.js server is running",
+              "Confirm IP address and port",
+              "Confirm CORS is enabled",
+            ],
+          },
+          null,
+          2,
+        );
+
+        $("responseState").textContent =
+          "Connection failed";
+
+        $("responseState").className = "bad";
+      } finally {
+        $("sendBtn").disabled = false;
+        $("sendBtn").classList.remove("loading");
+        $("sendBtn").textContent = "Send API";
+        $("requestState").textContent = "Ready";
+        $("requestState").className = "ok";
+        updateCurlPreview();
+      }
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.classList.toggle(
+          "active",
+          tab.dataset.tab === tabName,
+        );
+      });
+
+      $("responseOutput").classList.toggle(
+        "hidden",
+        tabName !== "response",
+      );
+
+      $("headersOutput").classList.toggle(
+        "hidden",
+        tabName !== "headers",
+      );
+
+      $("curlOutput").classList.toggle(
+        "hidden",
+        tabName !== "curl",
+      );
+    }
+
+    loadSettings();
+    buildMenu();
+    selectApi(allApis[0].id);
+
+    ["baseUrl", "token", "method", "path", "requestBody"]
+      .forEach((id) => {
+        $(id).addEventListener("input", updateCurlPreview);
+        $(id).addEventListener("change", updateCurlPreview);
+      });
+
+    $("saveSettingsBtn").addEventListener(
+      "click",
+      saveSettings,
+    );
+
+    $("sendBtn").addEventListener(
+      "click",
+      sendRequest,
+    );
+
+    $("reloadSeedBtn").addEventListener(
+      "click",
+      refreshRequestBody,
+    );
+
+    $("formatBtn").addEventListener("click", () => {
+      try {
+        $("requestBody").value = JSON.stringify(
+          JSON.parse($("requestBody").value || "{}"),
+          null,
+          2,
+        );
+
+        updateCurlPreview();
+      } catch (error) {
+        alert(`Invalid JSON: ${error.message}`);
+      }
+    });
+
+    $("copyCurlBtn").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(buildCurl());
+
+      $("requestState").textContent = "cURL copied";
+      $("requestState").className = "ok";
+    });
+
+    $("clearResponseBtn").addEventListener(
+      "click",
+      () => {
+        $("responseOutput").textContent = "{}";
+        $("headersOutput").textContent = "{}";
+        $("statusValue").textContent = "-";
+        $("totalTimeValue").textContent = "-";
+        $("databaseTimeValue").textContent = "-";
+        $("apiTimeValue").textContent = "-";
+        $("responseState").textContent =
+          "No request sent";
+        $("responseState").className = "warn";
+      },
+    );
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        switchTab(tab.dataset.tab);
+      });
+    });
+  </script>
+</body>
+</html>

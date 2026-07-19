@@ -32,14 +32,14 @@ const schoolSchema = new mongoose.Schema(
 
       pincode: String,
       latitude: {
-    type: Number,
-    default: null,
-  },
+        type: Number,
+        default: null,
+      },
 
-  longitude: {
-    type: Number,
-    default: null,
-  },
+      longitude: {
+        type: Number,
+        default: null,
+      },
     },
 
     /*
@@ -71,8 +71,6 @@ const schoolSchema = new mongoose.Schema(
     ==================================================
     */
 
-   
-
     /*
     ==================================================
     AUTH
@@ -84,11 +82,15 @@ const schoolSchema = new mongoose.Schema(
       default: false,
     },
 
-  tokenVersion: {
+    tokenVersion: {
       type: Number,
       default: 0,
     },
-
+    
+    token: {
+      type: String,
+      default: null,
+    },
     /*
     ==================================================
     DASHBOARD REFERENCES ONLY
@@ -129,10 +131,7 @@ const schoolSchema = new mongoose.Schema(
   },
 );
 
-module.exports = mongoose.model(
-  "School",
-  schoolSchema,
-);
+module.exports = mongoose.model("School", schoolSchema);
 
 /*
 ==================================================

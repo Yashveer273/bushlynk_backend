@@ -54,7 +54,7 @@ const StudentSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
+
     },
 
     /*
@@ -66,7 +66,7 @@ const StudentSchema = new mongoose.Schema(
     schoolId: {
       type: String,
       required: true,
-      index: true,
+  
     },
 
     /*
@@ -192,7 +192,17 @@ const StudentSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
+StudentSchema.index(
+  {
+    schoolId: 1,
+    parentId: 1,
+    "status.active": 1,
+  },
+  {
+        unique: true,
+    name: "active_parent_lookup",
+  },
+);
 module.exports =
   mongoose.models.Students ||
   mongoose.model(

@@ -4,21 +4,17 @@ const driverSchema = new mongoose.Schema(
   {
     driverId: {
       type: String,
-      unique: true,
       required: true,
-      index: true,
     },
 
     schoolId: {
       type: String,
       required: true,
-      index: true,
     },
 
     phone: {
       type: String,
       required: true,
-      index: true,
     },
 
     name: {
@@ -61,10 +57,12 @@ const driverSchema = new mongoose.Schema(
         },
       },
     ],
+
     defaultAsignBusNumber: {
       type: String,
       default: "",
     },
+
     CurentJob: {
       busNumber: {
         type: String,
@@ -84,4 +82,66 @@ const driverSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+/*
+  Used by:
+  createDriver
+  removeDriver
+  getDriverByBus
+  startDriverJob
+  endDriverJob
+  getDefaultAssignedBus
+*/
+driverSchema.index(
+  {
+    schoolId: 1,
+    driverId: 1,
+  },
+  {
+    unique: true,
+  },
+);
+
+/*
+  Used by:
+  driverLogin
+  login history by phone
+*/
+driverSchema.index(
+  {
+    schoolId: 1,
+    phone: 1,
+  },
+  {
+    unique: true,
+  },
+);
+
+/*
+  Used by start/end job password verification.
+  This may be optional because the previous schoolId + driverId
+  compound index already narrows the query to one driver.
+*/
+driverSchema.index({
+  schoolId: 1,
+  driverId: 1,
+  password: 1,
+});
+
+/*
+  Helpful when searching active jobs by bus number.
+*/
+driverSchema.index({
+  schoolId: 1,
+  "CurentJob.busNumber": 1,
+});
+
+/*
+  Helpful for default assigned bus lookups or admin filtering.
+*/
+driverSchema.index({
+  schoolId: 1,
+  defaultAsignBusNumber: 1,
+});
+
 module.exports = mongoose.model("Driver", driverSchema);

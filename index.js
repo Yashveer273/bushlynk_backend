@@ -7,12 +7,28 @@ require("./config/firebase");
 const { loadPickupPoints } = require("./services/loadpicups_in_redis");
 
 const app = express();
+
 app.use(
   cors({
     origin: "*",
     methods: "*",
   }),
 );
+app.use((req, res, next) => {
+  const start = performance.now();
+
+  res.on("finish", () => {
+    console.log({
+      method: req.method,
+      url: req.originalUrl,
+      status: res.statusCode,
+      completeExpressTime:
+        `${(performance.now() - start).toFixed(2)}ms`,
+    });
+  });
+
+  next();
+});
 app.use(express.json());
 
 /*

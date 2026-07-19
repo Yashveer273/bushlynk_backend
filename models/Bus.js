@@ -6,30 +6,46 @@ const busSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
+      trim: true,
     },
+
     busAsignNumber: {
       type: String,
+      trim: true,
     },
+
     schoolId: {
       type: String,
       required: true,
-      index: true,
+      trim: true,
     },
+
     defaultAsignDriver: {
-      DriverId: String,
-      DriverName:String,
-      phone:String,
+      DriverId: {
+        type: String,
+        default: "",
+      },
+      DriverName: {
+        type: String,
+        default: "",
+      },
+      phone: {
+        type: String,
+        default: "",
+      },
     },
-    /*
-      Assigned driver
-    */
+
     driverlogin: {
-      driverId: String,
+      driverId: {
+        type: String,
+        default: "",
+      },
       assignedAt: Date,
-      driverName: String,
+      driverName: {
+        type: String,
+        default: "",
+      },
     },
-   
 
     status: {
       active: {
@@ -45,17 +61,42 @@ const busSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    versionKey: false,
   },
 );
 
-module.exports = mongoose.model("Bus", busSchema);
-
 /*
-WHY:
-
-Bus connected with:
-- school
-- driver
-- pickup points
-- students
+============================================================
+INDEXES
+============================================================
 */
+
+// Supports GET /all with school filter and createdAt sorting
+busSchema.index({
+  schoolId: 1,
+  createdAt: -1,
+});
+
+// Prevent duplicate dashboard bus numbers inside one school
+busSchema.index(
+  {
+    schoolId: 1,
+    busAsignNumber: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      busAsignNumber: {
+        $type: "string",
+      },
+    },
+  },
+);
+
+// Supports default-driver bus lookup
+busSchema.index({
+  schoolId: 1,
+  busNumber: 1,
+});
+
+module.exports = mongoose.model("Bus", busSchema);

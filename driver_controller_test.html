@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Driver Controller API Tester</title>
+  <style>
+    :root {
+      --bg: #07111f;
+      --panel: #0e1b2e;
+      --panel-2: #13233a;
+      --border: #29405f;
+      --text: #ecf5ff;
+      --muted: #8fa7c2;
+      --accent: #4ea8ff;
+      --success: #37d67a;
+      --danger: #ff6470;
+      --warning: #ffca56;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(78,168,255,.13), transparent 30%),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    button, input, textarea, select { font: inherit; }
+
+    .app {
+      display: grid;
+      grid-template-columns: 285px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      border-right: 1px solid var(--border);
+      background: rgba(9, 20, 36, .94);
+      padding: 22px 16px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .brand {
+      padding: 0 8px 18px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    .brand p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .menu {
+      display: grid;
+      gap: 7px;
+    }
+
+    .menu button {
+      text-align: left;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 11px 12px;
+      cursor: pointer;
+      transition: .18s ease;
+    }
+
+    .menu button:hover,
+    .menu button.active {
+      color: white;
+      background: var(--panel-2);
+      border-color: var(--border);
+    }
+
+    main {
+      min-width: 0;
+      padding: 26px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .topbar h2 {
+      margin: 0;
+      font-size: 25px;
+    }
+
+    .topbar p {
+      margin: 7px 0 0;
+      color: var(--muted);
+    }
+
+    .badge {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--success);
+      border-radius: 999px;
+      padding: 8px 12px;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(340px, .78fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .card {
+      background: rgba(14, 27, 46, .93);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 18px 50px rgba(0,0,0,.16);
+    }
+
+    .card-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card-header h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .card-body { padding: 18px; }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .field.full { grid-column: 1 / -1; }
+
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 7px;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      color: var(--text);
+      background: #091728;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      outline: none;
+      padding: 11px 12px;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(78,168,255,.1);
+    }
+
+    textarea {
+      min-height: 210px;
+      resize: vertical;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .method-row {
+      display: grid;
+      grid-template-columns: 100px 1fr;
+      gap: 10px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 11px 15px;
+      cursor: pointer;
+      color: white;
+      background: var(--accent);
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 42px;
+    }
+
+    .btn.secondary {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn:disabled {
+      cursor: not-allowed;
+      opacity: .65;
+    }
+
+    .spinner {
+      width: 17px;
+      height: 17px;
+      border: 2px solid rgba(255,255,255,.35);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: none;
+    }
+
+    .loading .spinner { display: inline-block; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .stat {
+      background: #091728;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 11px;
+    }
+
+    .stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 5px;
+    }
+
+    .stat strong {
+      font-size: 14px;
+      word-break: break-word;
+    }
+
+    pre {
+      min-height: 420px;
+      max-height: 680px;
+      overflow: auto;
+      margin: 0;
+      padding: 16px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #06101d;
+      color: #d8ebff;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: 13px/1.55 Consolas, "Courier New", monospace;
+    }
+
+    .hint {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .status-ok { color: var(--success); }
+    .status-error { color: var(--danger); }
+    .status-wait { color: var(--warning); }
+
+    @media (max-width: 1000px) {
+      .app { grid-template-columns: 1fr; }
+      aside {
+        position: relative;
+        width: 100%;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .menu { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      main { padding: 18px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 620px) {
+      .field-grid, .stats { grid-template-columns: 1fr; }
+      .method-row { grid-template-columns: 1fr; }
+      .menu { grid-template-columns: 1fr; }
+      .topbar { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <div class="brand">
+        <h1>Driver API Tester</h1>
+        <p>
+          Admin/browser testing utility. The APIs remain compatible with the
+          Flutter driver application.
+        </p>
+      </div>
+      <div id="menu" class="menu"></div>
+    </aside>
+
+    <main>
+      <div class="topbar">
+        <div>
+          <h2 id="pageTitle">Driver Login</h2>
+          <p id="pageDescription">Test the selected driver controller endpoint.</p>
+        </div>
+        <div class="badge">Base route: /api/driver</div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="card-header">
+            <h3>Editable Request</h3>
+            <span id="requestLabel" class="status-wait">Ready</span>
+          </div>
+
+          <div class="card-body">
+            <div class="field-grid">
+              <div class="field full">
+                <label for="baseUrl">API Base URL</label>
+                <input id="baseUrl" value="http://192.168.1.7:3000/api/driver" />
+              </div>
+
+              <div class="field full">
+                <label>Method and endpoint</label>
+                <div class="method-row">
+                  <select id="method"></select>
+                  <input id="endpoint" />
+                </div>
+              </div>
+
+              <div class="field full">
+                <label for="authToken">
+                  School/Admin Bearer Token (used only by protected routes)
+                </label>
+                <input
+                  id="authToken"
+                  placeholder="Paste school auth token here"
+                  autocomplete="off"
+                />
+              </div>
+
+              <div class="field full">
+                <label for="requestBody">Request JSON / Query values</label>
+                <textarea id="requestBody" spellcheck="false"></textarea>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button id="sendButton" class="btn">
+                <span class="spinner"></span>
+                <span id="sendButtonText">Hit API</span>
+              </button>
+              <button id="formatButton" class="btn secondary">Format JSON</button>
+              <button id="copyButton" class="btn secondary">Copy Response</button>
+              <button id="clearButton" class="btn secondary">Clear Response</button>
+            </div>
+
+            <div class="hint">
+              GET endpoints automatically convert the JSON object into query
+              parameters. Route placeholders such as <code>:schoolId</code>,
+              <code>:driverId</code>, and <code>:busNumber</code> are replaced
+              using matching JSON fields.
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h3>API Response</h3>
+            <span id="responseStatus">Not called</span>
+          </div>
+
+          <div class="card-body">
+            <div class="stats">
+              <div class="stat">
+                <span>HTTP status</span>
+                <strong id="httpStatus">—</strong>
+              </div>
+              <div class="stat">
+                <span>Browser time</span>
+                <strong id="totalTime">—</strong>
+              </div>
+              <div class="stat">
+                <span>Database time header</span>
+                <strong id="dbTime">—</strong>
+              </div>
+            </div>
+
+            <pre id="responseOutput">Select an endpoint and press “Hit API”.</pre>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const endpoints = [
+      {
+        name: "Driver Login",
+        method: "POST",
+        path: "/login",
+        auth: false,
+        description: "Mobile app login using schoolId and phone.",
+        body: { schoolId: "SCH-YTFTY", phone: "9627068854" }
+      },
+      {
+        name: "Start Driver Job",
+        method: "POST",
+        path: "/startDriverJob",
+        auth: false,
+        description: "Start or claim a selected bus from the driver app or admin web.",
+        body: {
+          schoolId: "SCH-YTFTY",
+          driverId: "DRV-001",
+          password: "1234",
+          busNumber: "UP15AB123"
+        }
+      },
+      {
+        name: "End Driver Job",
+        method: "POST",
+        path: "/endDriverJob",
+        auth: false,
+        description: "Stop the selected bus owned by the driver.",
+        body: {
+          schoolId: "SCH-YTFTY",
+          driverId: "DRV-001",
+          password: "1234",
+          busNumber: "UP15AB123"
+        }
+      },
+      {
+        name: "Bus Job Status",
+        method: "GET",
+        path: "/job-status/data/:schoolId/:driverId/:busNumber",
+        auth: false,
+        description: "Check whether a bus is free, occupied by this driver, or occupied by another driver.",
+        body: {
+          schoolId: "SCH-YTFTY",
+          driverId: "DRV-001",
+          busNumber: "UP15AB123"
+        }
+      },
+      {
+        name: "Default Assigned Bus",
+        method: "POST",
+        path: "/getDefaultAssignedBus",
+        auth: false,
+        description: "Fetch the driver's configured default bus.",
+        body: { schoolId: "SCH-YTFTY", driverId: "DRV-001" }
+      },
+      {
+        name: "Login History",
+        method: "GET",
+        path: "/login-history",
+        auth: false,
+        description: "Fetch the driver's login history for the last 30 days.",
+        body: { schoolId: "SCH-YTFTY", driverId: "DRV-001" }
+      },
+      {
+        name: "Create Driver",
+        method: "POST",
+        path: "/createDriver",
+        auth: true,
+        description: "Protected admin endpoint for creating a driver.",
+        body: {
+          driverId: "DRV-001",
+          name: "Driver Name",
+          phone: "9627068854",
+          password: "1234"
+        }
+      },
+      {
+        name: "Remove Driver",
+        method: "POST",
+        path: "/remove",
+        auth: true,
+        description: "Protected admin endpoint. driverId is sent as a query parameter.",
+        body: { driverId: "DRV-001" },
+        forceQuery: true
+      },
+      {
+        name: "Drivers by School",
+        method: "GET",
+        path: "/getDriversBySchool",
+        auth: true,
+        description: "Protected paginated driver list for the school admin.",
+        body: { page: 1, limit: 100, search: "" }
+      },
+      {
+        name: "Driver by Bus",
+        method: "GET",
+        path: "/getDriverByBus",
+        auth: true,
+        description: "Protected endpoint to fetch the driver assigned to a bus.",
+        body: { busNumber: "UP15AB123" }
+      }
+    ];
+
+    const menu = document.getElementById("menu");
+    const pageTitle = document.getElementById("pageTitle");
+    const pageDescription = document.getElementById("pageDescription");
+    const methodInput = document.getElementById("method");
+    const endpointInput = document.getElementById("endpoint");
+    const requestBody = document.getElementById("requestBody");
+    const authToken = document.getElementById("authToken");
+    const baseUrl = document.getElementById("baseUrl");
+    const sendButton = document.getElementById("sendButton");
+    const sendButtonText = document.getElementById("sendButtonText");
+    const requestLabel = document.getElementById("requestLabel");
+    const responseStatus = document.getElementById("responseStatus");
+    const responseOutput = document.getElementById("responseOutput");
+    const httpStatus = document.getElementById("httpStatus");
+    const totalTime = document.getElementById("totalTime");
+    const dbTime = document.getElementById("dbTime");
+
+    ["GET", "POST", "PUT", "PATCH", "DELETE"].forEach((method) => {
+      const option = document.createElement("option");
+      option.value = method;
+      option.textContent = method;
+      methodInput.appendChild(option);
+    });
+
+    let selectedIndex = 0;
+
+    function loadEndpoint(index) {
+      selectedIndex = index;
+      const selected = endpoints[index];
+
+      [...menu.children].forEach((button, buttonIndex) => {
+        button.classList.toggle("active", buttonIndex === index);
+      });
+
+      pageTitle.textContent = selected.name;
+      pageDescription.textContent = selected.description;
+      methodInput.value = selected.method;
+      endpointInput.value = selected.path;
+      requestBody.value = JSON.stringify(selected.body, null, 2);
+      requestLabel.textContent = selected.auth
+        ? "Bearer token required"
+        : "No auth required";
+      requestLabel.className = selected.auth ? "status-wait" : "status-ok";
+    }
+
+    endpoints.forEach((endpoint, index) => {
+      const button = document.createElement("button");
+      button.textContent = `${endpoint.method}  ${endpoint.name}`;
+      button.addEventListener("click", () => loadEndpoint(index));
+      menu.appendChild(button);
+    });
+
+    function parseJsonBody() {
+      const raw = requestBody.value.trim();
+      if (!raw) return {};
+
+      try {
+        return JSON.parse(raw);
+      } catch (error) {
+        throw new Error(`Invalid request JSON: ${error.message}`);
+      }
+    }
+
+    function replacePathParams(path, data) {
+      const usedKeys = new Set();
+
+      const resolvedPath = path.replace(/:([A-Za-z0-9_]+)/g, (_, key) => {
+        const value = data[key];
+
+        if (value === undefined || value === null || value === "") {
+          throw new Error(`Missing route value: ${key}`);
+        }
+
+        usedKeys.add(key);
+        return encodeURIComponent(String(value));
+      });
+
+      return { resolvedPath, usedKeys };
+    }
+
+    function buildRequest() {
+      const selected = endpoints[selectedIndex];
+      const method = methodInput.value.toUpperCase();
+      const data = parseJsonBody();
+      const rawPath = endpointInput.value.trim();
+
+      if (!baseUrl.value.trim()) {
+        throw new Error("API Base URL is required");
+      }
+
+      if (!rawPath) {
+        throw new Error("Endpoint is required");
+      }
+
+      const { resolvedPath, usedKeys } = replacePathParams(rawPath, data);
+      const url = new URL(baseUrl.value.replace(/\/$/, "") + resolvedPath);
+
+      const shouldUseQuery =
+        method === "GET" ||
+        method === "DELETE" ||
+        selected.forceQuery === true;
+
+      const remainingEntries = Object.entries(data).filter(
+        ([key]) => !usedKeys.has(key)
+      );
+
+      const options = {
+        method,
+        headers: {
+          Accept: "application/json"
+        }
+      };
+
+      const token = authToken.value.trim();
+      if (token) {
+        options.headers.Authorization = `Bearer ${token}`;
+      }
+
+      if (shouldUseQuery) {
+        for (const [key, value] of remainingEntries) {
+          if (value !== undefined && value !== null && value !== "") {
+            url.searchParams.set(
+              key,
+              typeof value === "object" ? JSON.stringify(value) : String(value)
+            );
+          }
+        }
+      } else {
+        options.headers["Content-Type"] = "application/json";
+        options.body = JSON.stringify(
+          Object.fromEntries(remainingEntries)
+        );
+      }
+
+      return { url: url.toString(), options };
+    }
+
+    async function hitApi() {
+      let request;
+
+      try {
+        request = buildRequest();
+      } catch (error) {
+        responseStatus.textContent = "Request error";
+        responseStatus.className = "status-error";
+        responseOutput.textContent = error.message;
+        return;
+      }
+
+      sendButton.disabled = true;
+      sendButton.classList.add("loading");
+      sendButtonText.textContent = "API in process...";
+      requestLabel.textContent = "Sending request";
+      requestLabel.className = "status-wait";
+      responseStatus.textContent = "Loading";
+      responseStatus.className = "status-wait";
+      responseOutput.textContent =
+        `${request.options.method} ${request.url}\n\nWaiting for server response...`;
+      httpStatus.textContent = "—";
+      totalTime.textContent = "—";
+      dbTime.textContent = "—";
+
+      const startedAt = performance.now();
+
+      try {
+        const response = await fetch(request.url, request.options);
+        const elapsed = performance.now() - startedAt;
+        const rawText = await response.text();
+
+        let parsed;
+        try {
+          parsed = rawText ? JSON.parse(rawText) : null;
+        } catch (_) {
+          parsed = rawText;
+        }
+
+        const headers = {};
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+
+        const finalOutput = {
+          request: {
+            method: request.options.method,
+            url: request.url,
+            body: request.options.body
+              ? JSON.parse(request.options.body)
+              : undefined
+          },
+          response: {
+            status: response.status,
+            statusText: response.statusText,
+            headers,
+            data: parsed
+          }
+        };
+
+        responseOutput.textContent = JSON.stringify(finalOutput, null, 2);
+        httpStatus.textContent = `${response.status} ${response.statusText}`;
+        totalTime.textContent = `${elapsed.toFixed(2)} ms`;
+        dbTime.textContent =
+          response.headers.get("x-database-time") ||
+          response.headers.get("x-api-time") ||
+          "Not provided";
+
+        responseStatus.textContent = response.ok ? "Success" : "API error";
+        responseStatus.className = response.ok
+          ? "status-ok"
+          : "status-error";
+        requestLabel.textContent = "Request completed";
+        requestLabel.className = response.ok
+          ? "status-ok"
+          : "status-error";
+      } catch (error) {
+        const elapsed = performance.now() - startedAt;
+        responseStatus.textContent = "Network error";
+        responseStatus.className = "status-error";
+        requestLabel.textContent = "Request failed";
+        requestLabel.className = "status-error";
+        totalTime.textContent = `${elapsed.toFixed(2)} ms`;
+        responseOutput.textContent =
+          `${error.message}\n\nCheck server URL, CORS, internet/network, and whether the Node.js server is running.`;
+      } finally {
+        sendButton.disabled = false;
+        sendButton.classList.remove("loading");
+        sendButtonText.textContent = "Hit API";
+      }
+    }
+
+    sendButton.addEventListener("click", hitApi);
+
+    document.getElementById("formatButton").addEventListener("click", () => {
+      try {
+        requestBody.value = JSON.stringify(parseJsonBody(), null, 2);
+      } catch (error) {
+        responseOutput.textContent = error.message;
+      }
+    });
+
+    document.getElementById("copyButton").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(responseOutput.textContent);
+        requestLabel.textContent = "Response copied";
+        requestLabel.className = "status-ok";
+      } catch (_) {
+        requestLabel.textContent = "Copy failed";
+        requestLabel.className = "status-error";
+      }
+    });
+
+    document.getElementById("clearButton").addEventListener("click", () => {
+      responseOutput.textContent = "";
+      responseStatus.textContent = "Cleared";
+      responseStatus.className = "";
+      httpStatus.textContent = "—";
+      totalTime.textContent = "—";
+      dbTime.textContent = "—";
+    });
+
+    loadEndpoint(0);
+  </script>
+</body>
+</html>
