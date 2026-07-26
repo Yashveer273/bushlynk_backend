@@ -553,7 +553,7 @@
             Correct registration order:
             <strong>Send Register OTP → Verify Register OTP → Create Student.</strong>
             <span class="token-note">
-              OTP fields appear below the response only after the first API succeeds.
+              OTP authentication token appears automatically after Send Register OTP. Enter the OTP manually from the Node.js console.
             </span>
           </div>
         </div>
@@ -602,11 +602,17 @@
 
       <section id="otpVerificationCard" class="flow-card hidden">
         <div class="card-head">
-          <h3>Verify Registration OTP</h3>
+          <h3>Step 2 — Verify Registration OTP</h3>
           <span id="otpFlowState" class="warn">OTP verification required</span>
         </div>
 
         <div class="card-body">
+          <div class="seed-note" style="margin-top:0; margin-bottom:14px;">
+            First call <strong>Send Register OTP</strong>. The OTP authentication
+            token will appear automatically. Read the OTP from the Node.js
+            console and enter it manually below.
+          </div>
+
           <div class="grid-2">
             <div class="field">
               <label for="otpAuthToken">OTP Authentication Token</label>
@@ -623,7 +629,7 @@
                 id="otp"
                 inputmode="numeric"
                 maxlength="6"
-                placeholder="Enter received OTP"
+                placeholder="Enter the 6-digit OTP shown in the server console"
               />
             </div>
           </div>
@@ -638,7 +644,7 @@
 
       <section id="registrationTokenCard" class="flow-card hidden">
         <div class="card-head">
-          <h3>Student Registration</h3>
+          <h3>Step 3 — Student Registration</h3>
           <span class="ok">OTP verified successfully</span>
         </div>
 
@@ -1069,63 +1075,88 @@
     }
 
     function captureRegistrationFlowData(apiId, parsed) {
+      if (!parsed || typeof parsed !== "object") {
+        return;
+      }
+
       if (apiId === "send-register-otp") {
         const otpAuthToken =
           parsed?.data?.otpAuthToken ||
-          parsed?.data?.otpToken ||
-          parsed?.data?.verificationToken ||
-          parsed?.data?.token ||
           parsed?.otpAuthToken ||
-          parsed?.otpToken ||
-          parsed?.verificationToken ||
-          parsed?.token;
+          "";
 
-        if (otpAuthToken) {
-          $("otpAuthToken").value = otpAuthToken;
+        $("otp").value = "";
+        localStorage.removeItem("studentRegistrationOtp");
 
-          localStorage.setItem(
-            "studentOtpAuthToken",
-            otpAuthToken,
-          );
-
+        if (!otpAuthToken) {
           $("otpVerificationCard").classList.remove("hidden");
-          $("otpFlowState").textContent = "OTP sent — enter OTP below";
-          $("otpFlowState").className = "ok";
+          $("otpFlowState").textContent =
+            "OTP sent, but otpAuthToken was not returned";
+          $("otpFlowState").className = "bad";
 
-          setTimeout(() => {
-            $("otpVerificationCard").scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-            $("otp").focus();
-          }, 100);
+          alert(
+            "Send Register OTP did not return data.otpAuthToken.",
+          );
+          return;
         }
+
+        $("otpAuthToken").value = String(otpAuthToken);
+
+        localStorage.setItem(
+          "studentOtpAuthToken",
+          String(otpAuthToken),
+        );
+
+        $("otpVerificationCard").classList.remove("hidden");
+        $("registrationTokenCard").classList.add("hidden");
+        $("registrationToken").value = "";
+        localStorage.removeItem("studentRegistrationToken");
+
+        $("otpFlowState").textContent =
+          "OTP sent — token received. Enter console OTP.";
+        $("otpFlowState").className = "ok";
+
+        setTimeout(() => {
+          $("otpVerificationCard").scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+          $("otp").focus();
+        }, 100);
       }
 
       if (apiId === "verify-register-otp") {
         const registrationToken =
           parsed?.data?.registrationToken ||
-          parsed?.registrationToken;
+          parsed?.registrationToken ||
+          "";
 
-        if (registrationToken) {
-          $("registrationToken").value = registrationToken;
-
-          localStorage.setItem(
-            "studentRegistrationToken",
-            registrationToken,
-          );
-
-          $("registrationTokenCard").classList.remove("hidden");
-          $("otpFlowState").textContent = "OTP verified successfully";
-          $("otpFlowState").className = "ok";
-
-          setTimeout(() => {
-            $("registrationTokenCard").scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-          }, 100);
+        if (!registrationToken) {
+          $("otpFlowState").textContent =
+            "OTP verified, but registrationToken was not returned";
+          $("otpFlowState").className = "bad";
+          return;
         }
+
+        $("registrationToken").value =
+          String(registrationToken);
+
+        localStorage.setItem(
+          "studentRegistrationToken",
+          String(registrationToken),
+        );
+
+        $("registrationTokenCard").classList.remove("hidden");
+        $("otpFlowState").textContent =
+          "OTP verified successfully";
+        $("otpFlowState").className = "ok";
+
+        setTimeout(() => {
+          $("registrationTokenCard").scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }, 100);
       }
 
       refreshMenuPaths();
@@ -1150,19 +1181,10 @@
         return;
       }
 
-      if (
-        selectedApi.id === "create-student" &&
-        !$("registrationToken").value.trim()
-      ) {
-        alert(
-          "Verify the registration OTP first. registrationToken is required.",
-        );
-        return;
-      }
+     
 
       if (
-        selectedApi.id === "verify-register-otp" &&
-        !$("otpAuthToken").value.trim()
+        selectedApi.id === "verify-register-otp" 
       ) {
         alert(
           "Send the registration OTP first. OTP authentication token is required.",
@@ -1312,6 +1334,7 @@
       $("otpVerificationCard").classList.remove("hidden");
     }
 
+
     const storedRegistrationToken =
       localStorage.getItem("studentRegistrationToken");
 
@@ -1337,27 +1360,38 @@
       $(id).addEventListener("change", updateCurlPreview);
     });
 
-    $("otp").addEventListener("input", () => {
-      if (selectedApi.id === "verify-register-otp") {
-        loadSelectedApiSeed();
-      }
+    ["otp", "otpAuthToken"].forEach((id) => {
+      $(id).addEventListener("input", () => {
+        if (selectedApi.id === "verify-register-otp") {
+          loadSelectedApiSeed();
+        }
+      });
     });
 
     $("saveSettingsBtn").addEventListener("click", saveSettings);
     $("sendBtn").addEventListener("click", sendRequest);
     $("reloadSeedBtn").addEventListener("click", loadSelectedApiSeed);
 
-    $("verifyRegistrationOtpBtn").addEventListener("click", () => {
+    $("verifyRegistrationOtpBtn").addEventListener("click", async () => {
+      const parentPhone = $("parentPhone").value.trim();
       const otp = $("otp").value.trim();
       const otpAuthToken = $("otpAuthToken").value.trim();
 
+      
+
       if (!otpAuthToken) {
-        alert("OTP authentication token is missing.");
+        alert(
+          "Send the registration OTP first. OTP authentication token is required.",
+        );
+        selectApi("send-register-otp");
         return;
       }
 
-      if (!otp) {
-        alert("Please enter the OTP.");
+      if (!/^\\d{6}$/.test(otp)) {
+        alert(
+          "Enter the 6-digit OTP shown in the Node.js console.",
+        );
+        $("otp").focus();
         return;
       }
 
@@ -1365,7 +1399,7 @@
 
       $("requestBody").value = JSON.stringify(
         {
-          parentPhone: $("parentPhone").value.trim(),
+          parentPhone,
           otp,
           otpAuthToken,
         },
@@ -1373,7 +1407,8 @@
         2,
       );
 
-      sendRequest();
+      updateCurlPreview();
+      await sendRequest();
     });
 
     $("openCreateStudentBtn").addEventListener("click", () => {

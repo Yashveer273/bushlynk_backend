@@ -53,9 +53,7 @@ const formatSchoolId = (value) => {
 
   if (!schoolId) return "";
 
-  return schoolId.startsWith("SCH-")
-    ? schoolId
-    : `SCH-${schoolId}`;
+  return schoolId;
 };
 
 const isValidPhone = (phone) =>

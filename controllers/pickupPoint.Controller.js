@@ -1117,6 +1117,7 @@ Pickup slicing happens inside MongoDB.
 exports.getPaginatedBusesWithPickupPoints = async (req, res) => {
   try {
     const schoolId = clean(req.user?.schoolId);
+    console.log(schoolId);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.min(
       Math.max(Number(req.query.limit) || 5, 1),
@@ -1177,7 +1178,7 @@ exports.getPaginatedBusesWithPickupPoints = async (req, res) => {
         },
       },
     ]).option({ maxTimeMS: 3000 });
-
+console.log(result,"getPickup point with bus");
     const totalBuses = result?.totalBuses || 0;
     const data = (result?.data || []).map((bus) => ({
       ...bus,

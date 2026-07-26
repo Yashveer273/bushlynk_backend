@@ -1,59 +1,96 @@
-const redis = require("../config/redis");
+
 const { db } = require("../config/firebase");
 const { runEngines } = require("../engines/runEngines.js");
+const redis = require("../config/redis");
+
 
 async function processLocation(data) {
   try {
-    const { schoolId, busNumber,speed,timestamp , lat, lng } = data;
+    const {
+      schoolId,
+      busNumber,
+      speed,
+      timestamp,
+      lat,
+      lng,
+    } = data;
 
+    if (
+      !schoolId ||
+      !busNumber ||
+      lat == null ||
+      lng == null
+    ) {
+      console.error(
+        "Invalid location data:",
+        data,
+      );
 
-console.log("Processing Location:", data.speed);
+      return;
+    }
+
+    const updatedAt = Date.now();
+
+    const locationData = {
+      schoolId,
+      busNumber,
+      lat: Number(lat),
+      lng: Number(lng),
+      speed: Number(speed) || 0,
+      timestamp:
+        timestamp || updatedAt,
+      updatedAt,
+    };
+
     /*
-    ================================
-    SAVE LIVE GPS (REDIS)
-    ================================
+    Redis key includes schoolId.
+
+    This prevents collision if two schools
+    have the same bus number.
     */
 
-    await redis.set(
-      `bus:${busNumber}`,
-      JSON.stringify({
-        schoolId,
-        busNumber,
-        lat,
-        lng,
-        speed,
-        timestamp,
-        updatedAt: Date.now(),
-      })
-    );
+    const redisKey =
+      `school:${schoolId}:` +
+      `bus:${busNumber}:liveLocation`;
 
     /*
-    ================================
-    FIREBASE LIVE LOCATION
-    ================================
+    Firebase location stays under the bus.
+
+    Direct path:
+    schools/{schoolId}/buses/{busNumber}/liveLocation
     */
 
-    await db
-      .ref(`liveLocations/${schoolId}/${busNumber}`)
-      .set({
-        lat,
-        lng,
-        speed,
-        timestamp,
-        updatedAt: Date.now(),
-      });
+    const firebaseLocationPath =
+      `schools/${schoolId}/` +
+      `buses/${busNumber}/liveLocation`;
 
     /*
-    ================================
-    RUN ALL ENGINES (CENTRALIZED)
-    ================================
+    Save Redis and Firebase together.
+    */
+
+    await Promise.all([
+      redis.set(
+        redisKey,
+        JSON.stringify(locationData),
+      ),
+
+      db.ref(firebaseLocationPath).set(
+        locationData,
+      ),
+    ]);
+
+    /*
+    Run geofence, ETA and notification engines.
     */
 
     await runEngines(data);
-
-  } catch (err) {
-    console.log("Location Service Error:", err);
+  } catch (error) {
+    console.error(
+      "Location Service Error:",
+      error,
+    );
   }
 }
 
-module.exports = { processLocation };
+module.exports.processLocation =
+  processLocation;

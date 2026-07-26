@@ -529,6 +529,7 @@ exports.driverLogin = async (req, res) => {
         driverId: driver.driverId,
         schoolId: driver.schoolId,
         tokenVersion: driver.tokenVersion || 0,
+         role: "driver"
       },
       JWT_SECRET,
       {
@@ -617,8 +618,9 @@ exports.driverLogin = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Login successful",
+      message: "Driver login successful",
       token,
+       loginRole: "driver",
       driver: {
         id: driver._id,
         driverId: driver.driverId,
@@ -628,6 +630,7 @@ exports.driverLogin = async (req, res) => {
         CurentJob: driver.CurentJob,
       },
     });
+
   } catch (error) {
     console.error("Driver login error:", error);
 
@@ -646,6 +649,20 @@ exports.driverLogin = async (req, res) => {
    Firebase transaction prevents two drivers from claiming
    the same bus at the same time.
 ========================================================= */
+
+const getFirebasePaths = ({
+  schoolId,
+  busNumber,
+  driverId,
+}) => {
+  const schoolPath = `schools/${schoolId}`;
+
+  return {
+    schoolPath,
+    busPath: `${schoolPath}/buses/${busNumber}`,
+    driverPath: `${schoolPath}/drivers/${driverId}`,
+  };
+};
 exports.startDriverJob = async (req, res) => {
   const tracker = createPerformanceTracker();
 
@@ -659,15 +676,13 @@ exports.startDriverJob = async (req, res) => {
 
     return res.status(400).json({
       success: false,
-      message: "schoolId, driverId, password and busNumber are required",
+      message:
+        "schoolId, driverId, password and busNumber are required",
       performance: timings,
     });
   }
 
   try {
-    /*
-      Read driver and bus together.
-    */
     const parallelReadStartedAt = performance.now();
 
     const [driver, bus] = await Promise.all([
@@ -677,7 +692,9 @@ exports.startDriverJob = async (req, res) => {
           driverId,
           password,
         })
-          .select("driverId schoolId name phone CurentJob")
+          .select(
+            "schoolId driverId name phone CurentJob",
+          )
           .lean(),
       ),
 
@@ -689,367 +706,6 @@ exports.startDriverJob = async (req, res) => {
           .select(
             "schoolId busNumber busAsignNumber driverlogin status",
           )
-          .lean(),
-      ),
-    ]);
-
-    tracker.mark("parallelMongoReadTotal", parallelReadStartedAt);
-
-    if (!driver) {
-      const timings = tracker.finish();
-
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-        performance: timings,
-      });
-    }
-
-    if (!bus) {
-      const timings = tracker.finish();
-
-      return res.status(404).json({
-        success: false,
-        message: "Bus not found",
-        performance: timings,
-      });
-    }
-
-    /*
-      If this driver already owns this bus, do not start it again.
-    */
-    if (bus.driverlogin?.driverId === driverId) {
-      const timings = tracker.finish();
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "This bus is already occupied by you. Please stop this bus first.",
-        isOccupied: true,
-        occupiedByMe: true,
-        stopRequired: true,
-        performance: timings,
-      });
-    }
-
-    /*
-      If another driver owns this bus, reject immediately.
-    */
-    if (
-      bus.driverlogin?.driverId &&
-      bus.driverlogin.driverId !== driverId
-    ) {
-      const timings = tracker.finish();
-
-      return res.status(409).json({
-        success: false,
-        message: "Bus already occupied. Please select another bus.",
-        isOccupied: true,
-        occupiedByMe: false,
-        stopRequired: false,
-        occupied_by_driverId: bus.driverlogin.driverId,
-        occupied_by_driverName:
-          bus.driverlogin.driverName || null,
-        performance: timings,
-      });
-    }
-
-    const startedAt = new Date();
-    const startedAtIso = startedAt.toISOString();
-
-    /*
-      MongoDB performs the atomic bus lock.
-
-      Only one request can change a free bus to occupied.
-    */
-    const busClaimResult = await tracker.measure(
-      "mongoAtomicBusClaim",
-      () =>
-        Bus.updateOne(
-          {
-            schoolId,
-            busNumber,
-
-            $or: [
-              { "driverlogin.driverId": "" },
-              { "driverlogin.driverId": null },
-              {
-                "driverlogin.driverId": {
-                  $exists: false,
-                },
-              },
-            ],
-          },
-          {
-            $set: {
-              "driverlogin.driverId": driver.driverId,
-              "driverlogin.driverName": driver.name,
-              "driverlogin.assignedAt": startedAt,
-
-              "status.active": true,
-              "status.tripStarted": true,
-            },
-          },
-        ),
-    );
-
-    /*
-      Another request claimed the bus after our first read.
-    */
-    if (busClaimResult.modifiedCount === 0) {
-      const occupiedBus = await tracker.measure(
-        "mongoOccupiedBusRead",
-        () =>
-          Bus.findOne({
-            schoolId,
-            busNumber,
-          })
-            .select("driverlogin")
-            .lean(),
-      );
-
-      const occupiedDriverId =
-        occupiedBus?.driverlogin?.driverId || null;
-
-      const occupiedByMe =
-        occupiedDriverId === driverId;
-
-      const timings = tracker.finish();
-
-      return res.status(409).json({
-        success: false,
-        message: occupiedByMe
-          ? "This bus is already occupied by you. Please stop this bus first."
-          : "Bus was occupied by another driver during this request.",
-        isOccupied: true,
-        occupiedByMe,
-        stopRequired: occupiedByMe,
-        occupied_by_driverId: occupiedDriverId,
-        occupied_by_driverName:
-          occupiedBus?.driverlogin?.driverName || null,
-        performance: timings,
-      });
-    }
-
-    const driverJobData = {
-      busNumber: bus.busNumber,
-      busAsignNumber: bus.busAsignNumber || "",
-      startedAt,
-    };
-
-    /*
-      One Firebase request updates both locations.
-
-      Existing saving paths remain unchanged:
-      busJobs/{schoolId}/{busNumber}
-      driverJobs/{schoolId}/{driverId}
-    */
-    const firebaseUpdates = {
-      [`busJobs/${schoolId}/${busNumber}/isOccupied`]: true,
-      [`busJobs/${schoolId}/${busNumber}/schoolId`]: schoolId,
-      [`busJobs/${schoolId}/${busNumber}/driverId`]:
-        driver.driverId,
-      [`busJobs/${schoolId}/${busNumber}/driverName`]:
-        driver.name,
-      [`busJobs/${schoolId}/${busNumber}/phone`]:
-        driver.phone,
-      [`busJobs/${schoolId}/${busNumber}/busNumber`]:
-        bus.busNumber,
-      [`busJobs/${schoolId}/${busNumber}/busAsignNumber`]:
-        bus.busAsignNumber || "",
-      [`busJobs/${schoolId}/${busNumber}/startedAt`]:
-        startedAtIso,
-      [`busJobs/${schoolId}/${busNumber}/endedAt`]: null,
-      [`busJobs/${schoolId}/${busNumber}/updatedAt`]:
-        startedAtIso,
-
-      [`driverJobs/${schoolId}/${driverId}/isJobActive`]:
-        true,
-      [`driverJobs/${schoolId}/${driverId}/schoolId`]:
-        schoolId,
-      [`driverJobs/${schoolId}/${driverId}/driverId`]:
-        driver.driverId,
-      [`driverJobs/${schoolId}/${driverId}/driverName`]:
-        driver.name,
-      [`driverJobs/${schoolId}/${driverId}/phone`]:
-        driver.phone,
-      [`driverJobs/${schoolId}/${driverId}/currentBusNumber`]:
-        bus.busNumber,
-      [`driverJobs/${schoolId}/${driverId}/currentBusAsignNumber`]:
-        bus.busAsignNumber || "",
-      [`driverJobs/${schoolId}/${driverId}/startedAt`]:
-        startedAtIso,
-      [`driverJobs/${schoolId}/${driverId}/endedAt`]: null,
-      [`driverJobs/${schoolId}/${driverId}/updatedAt`]:
-        startedAtIso,
-    };
-
-    const parallelSaveStartedAt = performance.now();
-
-    try {
-      await Promise.all([
-        tracker.measure("mongoDriverJobUpdate", () =>
-          Driver.updateOne(
-            {
-              schoolId,
-              driverId,
-            },
-            {
-              $set: {
-                CurentJob: driverJobData,
-              },
-            },
-          ),
-        ),
-
-        tracker.measure("firebaseMultiLocationUpdate", () =>
-          db.ref().update(firebaseUpdates),
-        ),
-      ]);
-
-      tracker.mark(
-        "parallelSaveTotal",
-        parallelSaveStartedAt,
-      );
-    } catch (saveError) {
-      /*
-        Roll back the MongoDB bus lock if Firebase or driver update fails.
-      */
-      await Promise.allSettled([
-        tracker.measure("mongoBusRollback", () =>
-          Bus.updateOne(
-            {
-              schoolId,
-              busNumber,
-              "driverlogin.driverId": driverId,
-            },
-            {
-              $set: {
-                "driverlogin.driverId": "",
-                "driverlogin.driverName": "",
-                "driverlogin.assignedAt": null,
-                "status.tripStarted": false,
-              },
-            },
-          ),
-        ),
-
-        tracker.measure("mongoDriverRollback", () =>
-          Driver.updateOne(
-            {
-              schoolId,
-              driverId,
-              "CurentJob.busNumber": busNumber,
-            },
-            {
-              $set: {
-                "CurentJob.busNumber": "",
-                "CurentJob.busAsignNumber": "",
-                "CurentJob.startedAt": null,
-              },
-            },
-          ),
-        ),
-      ]);
-
-      throw saveError;
-    }
-
-    const timings = tracker.finish();
-
-    res.setHeader(
-      "X-Controller-Time",
-      `${timings.controllerTotal}ms`,
-    );
-
-    console.log("Start driver job performance:", {
-      schoolId,
-      driverId,
-      busNumber,
-      result: "success",
-      timings,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Bus started successfully",
-      data: {
-        isJobActive: true,
-        busNumber: bus.busNumber,
-        busAsignNumber: bus.busAsignNumber || "",
-        driverId: driver.driverId,
-        driverName: driver.name,
-        startedAt,
-      },
-      performance: timings,
-    });
-  } catch (error) {
-    const timings = tracker.finish();
-
-    console.error("Start driver job error:", {
-      schoolId,
-      driverId,
-      busNumber,
-      error: error.message,
-      timings,
-    });
-
-    return res.status(500).json({
-      success: false,
-      message: "Start driver job failed",
-      error: error.message,
-      performance: timings,
-    });
-  }
-};
-
-/* =========================================================
-   END DRIVER JOB
-   Existing body preserved:
-   { schoolId, driverId, password, busNumber }
-========================================================= */
-exports.endDriverJob = async (req, res) => {
-  const tracker = createPerformanceTracker();
-
-  const schoolId = normalize(req.body.schoolId);
-  const driverId = normalize(req.body.driverId);
-  const password = normalize(req.body.password);
-  const busNumber = normalize(req.body.busNumber);
-
-  if (!schoolId || !driverId || !password || !busNumber) {
-    const timings = tracker.finish();
-
-    return res.status(400).json({
-      success: false,
-      message: "schoolId, driverId, password and busNumber are required",
-      performance: timings,
-    });
-  }
-
-  try {
-    /*
-      MongoDB is now the ownership source.
-      Driver and bus are loaded together.
-    */
-    const parallelReadStartedAt = performance.now();
-
-    const [driver, bus] = await Promise.all([
-      tracker.measure("mongoDriverRead", () =>
-        Driver.findOne({
-          schoolId,
-          driverId,
-          password,
-        })
-          .select("driverId CurentJob")
-          .lean(),
-      ),
-
-      tracker.measure("mongoBusRead", () =>
-        Bus.findOne({
-          schoolId,
-          busNumber,
-        })
-          .select("busNumber busAsignNumber driverlogin status")
           .lean(),
       ),
     ]);
@@ -1079,7 +735,515 @@ exports.endDriverJob = async (req, res) => {
       });
     }
 
-    if (!bus.driverlogin?.driverId) {
+    /*
+    Driver is already using another bus.
+    */
+
+    const driverCurrentBus = normalize(
+      driver.CurentJob?.busNumber,
+    );
+
+    if (
+      driverCurrentBus &&
+      driverCurrentBus !== busNumber
+    ) {
+      const timings = tracker.finish();
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "You are already using another bus. Stop that bus first.",
+        isJobActive: true,
+        currentBusNumber: driverCurrentBus,
+        performance: timings,
+      });
+    }
+
+    /*
+    Same driver already owns this bus.
+    */
+
+    if (
+      normalize(bus.driverlogin?.driverId) === driverId
+    ) {
+      const timings = tracker.finish();
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "This bus is already occupied by you. Stop this bus first.",
+        isOccupied: true,
+        occupiedByMe: true,
+        stopRequired: true,
+        performance: timings,
+      });
+    }
+
+    /*
+    Another driver owns the bus.
+    */
+
+    if (
+      normalize(bus.driverlogin?.driverId) &&
+      normalize(bus.driverlogin?.driverId) !== driverId
+    ) {
+      const timings = tracker.finish();
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "Bus already occupied. Please select another bus.",
+        isOccupied: true,
+        occupiedByMe: false,
+        stopRequired: false,
+        occupied_by_driverId:
+          bus.driverlogin.driverId,
+        occupied_by_driverName:
+          bus.driverlogin.driverName || null,
+        performance: timings,
+      });
+    }
+
+    const startedAt = new Date();
+    const startedAtMs = startedAt.getTime();
+
+    /*
+    Atomic bus claim.
+
+    Only a free bus can be claimed.
+    */
+
+    const busClaimResult = await tracker.measure(
+      "mongoAtomicBusClaim",
+      () =>
+        Bus.updateOne(
+          {
+            schoolId,
+            busNumber,
+            $or: [
+              {
+                "driverlogin.driverId": "",
+              },
+              {
+                "driverlogin.driverId": null,
+              },
+              {
+                "driverlogin.driverId": {
+                  $exists: false,
+                },
+              },
+            ],
+          },
+          {
+            $set: {
+              "driverlogin.driverId":
+                driver.driverId,
+              "driverlogin.driverName":
+                driver.name || "",
+              "driverlogin.assignedAt":
+                startedAt,
+              "status.active": true,
+              "status.tripStarted": true,
+            },
+          },
+        ),
+    );
+
+    if (busClaimResult.modifiedCount === 0) {
+      const occupiedBus = await tracker.measure(
+        "mongoOccupiedBusRead",
+        () =>
+          Bus.findOne({
+            schoolId,
+            busNumber,
+          })
+            .select("driverlogin")
+            .lean(),
+      );
+
+      const occupiedDriverId = normalize(
+        occupiedBus?.driverlogin?.driverId,
+      );
+
+      const occupiedByMe =
+        occupiedDriverId === driverId;
+
+      const timings = tracker.finish();
+
+      return res.status(409).json({
+        success: false,
+        message: occupiedByMe
+          ? "This bus is already occupied by you."
+          : "Bus was occupied by another driver during this request.",
+        isOccupied: true,
+        occupiedByMe,
+        stopRequired: occupiedByMe,
+        occupied_by_driverId:
+          occupiedDriverId || null,
+        occupied_by_driverName:
+          occupiedBus?.driverlogin?.driverName ||
+          null,
+        performance: timings,
+      });
+    }
+
+    /*
+    Atomic driver job claim.
+
+    One driver cannot use multiple buses.
+    */
+
+    const driverJobData = {
+      busNumber: bus.busNumber,
+      busAsignNumber:
+        bus.busAsignNumber || "",
+      startedAt,
+    };
+
+    const driverClaimResult = await tracker.measure(
+      "mongoAtomicDriverClaim",
+      () =>
+        Driver.updateOne(
+          {
+            schoolId,
+            driverId,
+            $or: [
+              {
+                "CurentJob.busNumber": "",
+              },
+              {
+                "CurentJob.busNumber": null,
+              },
+              {
+                "CurentJob.busNumber": {
+                  $exists: false,
+                },
+              },
+            ],
+          },
+          {
+            $set: {
+              CurentJob: driverJobData,
+            },
+          },
+        ),
+    );
+
+    /*
+    Driver was already assigned somewhere else.
+    Release the bus again.
+    */
+
+    if (driverClaimResult.modifiedCount === 0) {
+      await tracker.measure(
+        "mongoBusClaimRollback",
+        () =>
+          Bus.updateOne(
+            {
+              schoolId,
+              busNumber,
+              "driverlogin.driverId":
+                driverId,
+            },
+            {
+              $set: {
+                "driverlogin.driverId": "",
+                "driverlogin.driverName": "",
+                "driverlogin.assignedAt":
+                  null,
+                "status.tripStarted": false,
+              },
+            },
+          ),
+      );
+
+      const activeDriver =
+        await Driver.findOne({
+          schoolId,
+          driverId,
+        })
+          .select("CurentJob")
+          .lean();
+
+      const timings = tracker.finish();
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "You are already using another bus. Stop that bus first.",
+        currentBusNumber:
+          activeDriver?.CurentJob?.busNumber ||
+          null,
+        performance: timings,
+      });
+    }
+
+    const {
+      schoolPath,
+      busPath,
+      driverPath,
+    } = getFirebasePaths({
+      schoolId,
+      busNumber,
+      driverId,
+    });
+
+    /*
+    One Firebase multi-location update.
+
+    This gives direct search by:
+    school -> bus
+    school -> driver
+    */
+
+    const firebaseUpdates = {
+      [`${schoolPath}/schoolId`]:
+        schoolId,
+
+      [`${schoolPath}/updatedAt`]:
+        startedAtMs,
+
+      /*
+      Bus information
+      */
+
+      [`${busPath}/info`]: {
+        busNumber: bus.busNumber,
+        busAsignNumber:
+          bus.busAsignNumber || "",
+      },
+
+      [`${busPath}/job`]: {
+        status: "ACTIVE",
+        isOccupied: true,
+
+        currentDriver: {
+          driverId: driver.driverId,
+          driverName: driver.name || "",
+          phone: driver.phone || "",
+        },
+
+        startedAt: startedAtMs,
+        endedAt: null,
+        updatedAt: startedAtMs,
+      },
+
+      /*
+      Driver information
+      */
+
+      [`${driverPath}/profile`]: {
+        driverId: driver.driverId,
+        driverName: driver.name || "",
+        phone: driver.phone || "",
+      },
+
+      [`${driverPath}/job`]: {
+        status: "ACTIVE",
+        isActive: true,
+
+        currentBus: {
+          busNumber: bus.busNumber,
+          busAsignNumber:
+            bus.busAsignNumber || "",
+        },
+
+        startedAt: startedAtMs,
+        endedAt: null,
+        updatedAt: startedAtMs,
+      },
+    };
+
+    try {
+      await tracker.measure(
+        "firebaseDriverJobStart",
+        () =>
+          db.ref().update(
+            firebaseUpdates,
+          ),
+      );
+    } catch (firebaseError) {
+      /*
+      Firebase failed.
+
+      Restore both MongoDB records.
+      */
+
+      await Promise.allSettled([
+        tracker.measure(
+          "mongoBusRollback",
+          () =>
+            Bus.updateOne(
+              {
+                schoolId,
+                busNumber,
+                "driverlogin.driverId":
+                  driverId,
+              },
+              {
+                $set: {
+                  "driverlogin.driverId":
+                    "",
+                  "driverlogin.driverName":
+                    "",
+                  "driverlogin.assignedAt":
+                    null,
+                  "status.tripStarted":
+                    false,
+                },
+              },
+            ),
+        ),
+
+        tracker.measure(
+          "mongoDriverRollback",
+          () =>
+            Driver.updateOne(
+              {
+                schoolId,
+                driverId,
+                "CurentJob.busNumber":
+                  busNumber,
+              },
+              {
+                $set: {
+                  "CurentJob.busNumber":
+                    "",
+                  "CurentJob.busAsignNumber":
+                    "",
+                  "CurentJob.startedAt":
+                    null,
+                },
+              },
+            ),
+        ),
+      ]);
+
+      throw firebaseError;
+    }
+
+    const timings = tracker.finish();
+
+    res.setHeader(
+      "X-Controller-Time",
+      `${timings.controllerTotal}ms`,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Bus started successfully",
+      data: {
+        isJobActive: true,
+        busNumber: bus.busNumber,
+        busAsignNumber:
+          bus.busAsignNumber || "",
+        driverId: driver.driverId,
+        driverName: driver.name || "",
+        startedAt,
+      },
+      performance: timings,
+    });
+  } catch (error) {
+    const timings = tracker.finish();
+
+    console.error(
+      "Start driver job error:",
+      {
+        schoolId,
+        driverId,
+        busNumber,
+        error: error.message,
+        timings,
+      },
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Start driver job failed",
+      error: error.message,
+      performance: timings,
+    });
+  }
+};
+
+/* =========================================================
+   END DRIVER JOB
+   Existing body preserved:
+   { schoolId, driverId, password, busNumber }
+========================================================= */
+exports.endDriverJob = async (req, res) => {
+  const tracker = createPerformanceTracker();
+
+  const schoolId = normalize(req.body.schoolId);
+  const driverId = normalize(req.body.driverId);
+  const password = normalize(req.body.password);
+  const busNumber = normalize(req.body.busNumber);
+
+  if (!schoolId || !driverId || !password || !busNumber) {
+    const timings = tracker.finish();
+
+    return res.status(400).json({
+      success: false,
+      message:
+        "schoolId, driverId, password and busNumber are required",
+      performance: timings,
+    });
+  }
+
+  try {
+    const parallelReadStartedAt = performance.now();
+
+    const [driver, bus] = await Promise.all([
+      tracker.measure("mongoDriverRead", () =>
+        Driver.findOne({
+          schoolId,
+          driverId,
+          password,
+        })
+          .select(
+            "schoolId driverId name phone CurentJob",
+          )
+          .lean(),
+      ),
+
+      tracker.measure("mongoBusRead", () =>
+        Bus.findOne({
+          schoolId,
+          busNumber,
+        })
+          .select(
+            "schoolId busNumber busAsignNumber driverlogin status",
+          )
+          .lean(),
+      ),
+    ]);
+
+    tracker.mark(
+      "parallelMongoReadTotal",
+      parallelReadStartedAt,
+    );
+
+    if (!driver) {
+      const timings = tracker.finish();
+
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+        performance: timings,
+      });
+    }
+
+    if (!bus) {
+      const timings = tracker.finish();
+
+      return res.status(404).json({
+        success: false,
+        message: "Bus not found",
+        performance: timings,
+      });
+    }
+
+    if (!normalize(bus.driverlogin?.driverId)) {
       const timings = tracker.finish();
 
       return res.status(400).json({
@@ -1089,14 +1253,18 @@ exports.endDriverJob = async (req, res) => {
       });
     }
 
-    if (bus.driverlogin.driverId !== driverId) {
+    if (
+      normalize(bus.driverlogin.driverId) !==
+      driverId
+    ) {
       const timings = tracker.finish();
 
       return res.status(403).json({
         success: false,
         message:
           `This bus is occupied by another driver ` +
-          `${bus.driverlogin.driverId}-${bus.driverlogin.driverName}. ` +
+          `${bus.driverlogin.driverId}-` +
+          `${bus.driverlogin.driverName || ""}. ` +
           `You cannot stop this bus.`,
         occupied_by_driverId:
           bus.driverlogin.driverId,
@@ -1107,120 +1275,273 @@ exports.endDriverJob = async (req, res) => {
     }
 
     const endedAt = new Date();
-    const endedAtIso = endedAt.toISOString();
+    const endedAtMs = endedAt.getTime();
+
+    const previousStartedAt =
+      driver.CurentJob?.startedAt ||
+      bus.driverlogin?.assignedAt ||
+      null;
+
+    const previousStartedAtMs =
+      previousStartedAt
+        ? new Date(
+            previousStartedAt,
+          ).getTime()
+        : null;
 
     /*
-      Atomic release: only the current driver can release this bus.
+    Release bus only if this driver owns it.
     */
-    const busRelease = await tracker.measure(
-      "mongoAtomicBusRelease",
-      () =>
-        Bus.updateOne(
-          {
-            schoolId,
-            busNumber,
-            "driverlogin.driverId": driverId,
-          },
-          {
-            $set: {
-              "driverlogin.driverId": "",
-              "driverlogin.driverName": "",
-              "driverlogin.assignedAt": null,
-              "status.tripStarted": false,
-            },
-          },
-        ),
-    );
 
-    if (busRelease.modifiedCount === 0) {
+    const busReleaseResult =
+      await tracker.measure(
+        "mongoAtomicBusRelease",
+        () =>
+          Bus.updateOne(
+            {
+              schoolId,
+              busNumber,
+              "driverlogin.driverId":
+                driverId,
+            },
+            {
+              $set: {
+                "driverlogin.driverId": "",
+                "driverlogin.driverName": "",
+                "driverlogin.assignedAt":
+                  null,
+                "status.tripStarted":
+                  false,
+              },
+            },
+          ),
+      );
+
+    if (
+      busReleaseResult.modifiedCount === 0
+    ) {
       const timings = tracker.finish();
 
       return res.status(409).json({
         success: false,
         message:
-          "Bus ownership changed during this request. Please refresh the status.",
+          "Bus ownership changed during this request. Refresh the status.",
         performance: timings,
       });
     }
 
-    const firebaseUpdates = {
-      [`busJobs/${schoolId}/${busNumber}/isOccupied`]: false,
-      [`busJobs/${schoolId}/${busNumber}/endedAt`]:
-        endedAtIso,
-      [`busJobs/${schoolId}/${busNumber}/updatedAt`]:
-        endedAtIso,
+    /*
+    Clear the driver's current job.
+    */
 
-      [`driverJobs/${schoolId}/${driverId}/isJobActive`]:
-        false,
-      [`driverJobs/${schoolId}/${driverId}/currentBusNumber`]:
-        null,
-      [`driverJobs/${schoolId}/${driverId}/currentBusAsignNumber`]:
-        null,
-      [`driverJobs/${schoolId}/${driverId}/endedAt`]:
-        endedAtIso,
-      [`driverJobs/${schoolId}/${driverId}/updatedAt`]:
-        endedAtIso,
-    };
-
-    const parallelSaveStartedAt = performance.now();
-
-    try {
-      await Promise.all([
-        tracker.measure("mongoDriverJobClear", () =>
+    const driverClearResult =
+      await tracker.measure(
+        "mongoDriverJobClear",
+        () =>
           Driver.updateOne(
             {
               schoolId,
               driverId,
-              "CurentJob.busNumber": busNumber,
+              "CurentJob.busNumber":
+                busNumber,
             },
             {
               $set: {
                 "CurentJob.busNumber": "",
-                "CurentJob.busAsignNumber": "",
+                "CurentJob.busAsignNumber":
+                  "",
                 "CurentJob.startedAt": null,
               },
             },
           ),
+      );
+
+    if (
+      driverClearResult.modifiedCount === 0
+    ) {
+      /*
+      Driver record could not be cleared.
+      Restore the bus ownership.
+      */
+
+      await tracker.measure(
+        "mongoBusReleaseRollback",
+        () =>
+          Bus.updateOne(
+            {
+              schoolId,
+              busNumber,
+              $or: [
+                {
+                  "driverlogin.driverId":
+                    "",
+                },
+                {
+                  "driverlogin.driverId":
+                    null,
+                },
+              ],
+            },
+            {
+              $set: {
+                "driverlogin.driverId":
+                  driverId,
+                "driverlogin.driverName":
+                  driver.name || "",
+                "driverlogin.assignedAt":
+                  previousStartedAt || null,
+                "status.active": true,
+                "status.tripStarted": true,
+              },
+            },
+          ),
+      );
+
+      const timings = tracker.finish();
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "Driver job changed during this request. Refresh the status.",
+        performance: timings,
+      });
+    }
+
+    const {
+      schoolPath,
+      busPath,
+      driverPath,
+    } = getFirebasePaths({
+      schoolId,
+      busNumber,
+      driverId,
+    });
+
+    /*
+    Do not change liveLocation here.
+
+    Start and stop only manage job state.
+    The location service manages liveLocation.
+    */
+
+    const firebaseUpdates = {
+      [`${schoolPath}/updatedAt`]:
+        endedAtMs,
+
+      /*
+      Bus is now free.
+      */
+
+      [`${busPath}/job`]: {
+        status: "INACTIVE",
+        isOccupied: false,
+        currentDriver: null,
+        startedAt:
+          previousStartedAtMs,
+        endedAt: endedAtMs,
+        updatedAt: endedAtMs,
+      },
+
+      /*
+      Driver has no active bus.
+      */
+
+      [`${driverPath}/job`]: {
+        status: "INACTIVE",
+        isActive: false,
+        currentBus: null,
+        startedAt:
+          previousStartedAtMs,
+        endedAt: endedAtMs,
+        updatedAt: endedAtMs,
+      },
+    };
+
+    try {
+      await tracker.measure(
+        "firebaseDriverJobStop",
+        () =>
+          db.ref().update(
+            firebaseUpdates,
+          ),
+      );
+    } catch (firebaseError) {
+      /*
+      Firebase failed.
+
+      Restore both MongoDB records.
+      */
+
+      await Promise.allSettled([
+        tracker.measure(
+          "mongoBusReleaseRollback",
+          () =>
+            Bus.updateOne(
+              {
+                schoolId,
+                busNumber,
+                $or: [
+                  {
+                    "driverlogin.driverId":
+                      "",
+                  },
+                  {
+                    "driverlogin.driverId":
+                      null,
+                  },
+                ],
+              },
+              {
+                $set: {
+                  "driverlogin.driverId":
+                    driverId,
+                  "driverlogin.driverName":
+                    driver.name || "",
+                  "driverlogin.assignedAt":
+                    previousStartedAt ||
+                    null,
+                  "status.active": true,
+                  "status.tripStarted":
+                    true,
+                },
+              },
+            ),
         ),
 
-        tracker.measure("firebaseMultiLocationUpdate", () =>
-          db.ref().update(firebaseUpdates),
+        tracker.measure(
+          "mongoDriverClearRollback",
+          () =>
+            Driver.updateOne(
+              {
+                schoolId,
+                driverId,
+                $or: [
+                  {
+                    "CurentJob.busNumber":
+                      "",
+                  },
+                  {
+                    "CurentJob.busNumber":
+                      null,
+                  },
+                ],
+              },
+              {
+                $set: {
+                  "CurentJob.busNumber":
+                    busNumber,
+                  "CurentJob.busAsignNumber":
+                    bus.busAsignNumber || "",
+                  "CurentJob.startedAt":
+                    previousStartedAt ||
+                    null,
+                },
+              },
+            ),
         ),
       ]);
 
-      tracker.mark(
-        "parallelSaveTotal",
-        parallelSaveStartedAt,
-      );
-    } catch (saveError) {
-      /*
-        Restore MongoDB bus ownership when final syncing fails.
-      */
-      await tracker.measure("mongoBusReleaseRollback", () =>
-        Bus.updateOne(
-          {
-            schoolId,
-            busNumber,
-            $or: [
-              { "driverlogin.driverId": "" },
-              { "driverlogin.driverId": null },
-            ],
-          },
-          {
-            $set: {
-              "driverlogin.driverId": driverId,
-              "driverlogin.driverName":
-                bus.driverlogin.driverName || "",
-              "driverlogin.assignedAt":
-                bus.driverlogin.assignedAt || null,
-              "status.active": true,
-              "status.tripStarted": true,
-            },
-          },
-        ),
-      );
-
-      throw saveError;
+      throw firebaseError;
     }
 
     const timings = tracker.finish();
@@ -1230,18 +1551,12 @@ exports.endDriverJob = async (req, res) => {
       `${timings.controllerTotal}ms`,
     );
 
-    console.log("End driver job performance:", {
-      schoolId,
-      driverId,
-      busNumber,
-      result: "success",
-      timings,
-    });
-
     return res.status(200).json({
       success: true,
-      message: "Selected bus stopped successfully",
+      message:
+        "Selected bus stopped successfully",
       data: {
+        isJobActive: false,
         busNumber,
         stoppedBy: driverId,
         endedAt,
@@ -1251,13 +1566,16 @@ exports.endDriverJob = async (req, res) => {
   } catch (error) {
     const timings = tracker.finish();
 
-    console.error("End driver job error:", {
-      schoolId,
-      driverId,
-      busNumber,
-      error: error.message,
-      timings,
-    });
+    console.error(
+      "End driver job error:",
+      {
+        schoolId,
+        driverId,
+        busNumber,
+        error: error.message,
+        timings,
+      },
+    );
 
     return res.status(500).json({
       success: false,

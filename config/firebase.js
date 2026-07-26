@@ -8,7 +8,7 @@ try {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL:
-      "https://project-k-a3ef5-default-rtdb.asia-southeast1.firebasedatabase.app/",
+      "https://easzauth-default-rtdb.firebaseio.com/",
   });
 
   db = admin.database();

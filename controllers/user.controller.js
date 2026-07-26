@@ -2,7 +2,8 @@ const generateId = require("../utils/generateId");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const { performance } = require("node:perf_hooks");
-
+const JWT_SECRET="0000000";
+const JWT_EXPIRES_IN="30d";
 const User = require("../models/students");
 const School = require("../models/School");
 const PickupPoint = require("../models/PickupPoint");
@@ -26,21 +27,35 @@ const createOtp = () =>
 const normalizePhone = (value) =>
   String(value || "").replace(/\D/g, "");
 
-const getRegisterOtpDeviceId = (phone) =>
-  `REGISTER:${phone}`;
-
-const getRegisterTokenSecret = () => {
-  const secret =
-    process.env.REGISTER_OTP_SECRET ||
-    process.env.JWT_SECRET;
-
-  if (!secret) {
-    throw new Error(
-      "REGISTER_OTP_SECRET or JWT_SECRET is missing",
-    );
+const createDeviceSession = ({ userId, parentId, schoolId, deviceId }) => {
+  if (!JWT_SECRET) {
+    throw new Error("JWT_SECRET is not configured");
   }
 
-  return secret;
+  const token = jwt.sign(
+    {
+      userId: String(userId),
+      parentId: String(parentId),
+      schoolId: String(schoolId),
+      deviceId: String(deviceId),
+      role: "parent",
+    },
+    JWT_SECRET,
+    {
+      expiresIn: JWT_EXPIRES_IN || "30d",
+    },
+  );
+
+  const decodedToken = jwt.decode(token);
+
+  if (!decodedToken?.exp) {
+    throw new Error("Unable to calculate token expiry");
+  }
+
+  return {
+    token,
+    tokenExpiry: new Date(decodedToken.exp * 1000),
+  };
 };
 
 /*
@@ -49,785 +64,175 @@ const getRegisterTokenSecret = () => {
 ===============================================================================
 */
 exports.sendRegisterOTP = async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message:
+      "Registration OTP is disabled. College authority creates parent records directly.",
+  });
+};
+
+exports.verifyRegisterOTP = async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message:
+      "Registration OTP verification is disabled. College authority creates parent records directly.",
+  });
+};
+
+exports.createStudent = async (req, res) => {
   const apiStartedAt = performance.now();
   let databaseTime = 0;
 
   try {
+    /*
+    Parent creation is an authority-only operation.
+
+    No OTP, JWT, deviceId or FCM token is required here.
+    The devices array remains empty until the parent logs in.
+    */
     const { schoolId } = req.user;
-    const parentPhone = normalizePhone(req.body.parentPhone);
+    const { parent, child } = req.body;
 
-    if (!schoolId || !/^[6-9]\d{9}$/.test(parentPhone)) {
-      finishTiming(res, apiStartedAt, databaseTime);
+    const parentName = cleanText(parent?.name);
+    const parentPhone = normalizePhone(parent?.phone);
+    const children = Array.isArray(child) ? child : [];
+    const missingFields = [];
 
-      return res.status(400).json({
-        success: false,
-        message:
-          "Valid schoolId and 10-digit parentPhone are required",
+    if (!schoolId) missingFields.push("schoolId");
+    if (!parentName) missingFields.push("parent.name");
+
+    if (!/^[6-9]\d{9}$/.test(parentPhone)) {
+      missingFields.push("valid parent.phone");
+    }
+
+    if (!children.length) {
+      missingFields.push("child array");
+    } else {
+      children.forEach((item, index) => {
+        if (!cleanText(item?.studentId)) {
+          missingFields.push(`child[${index}].studentId`);
+        }
+        if (!cleanText(item?.name)) {
+          missingFields.push(`child[${index}].name`);
+        }
+        if (!cleanText(item?.class)) {
+          missingFields.push(`child[${index}].class`);
+        }
+        if (!cleanText(item?.section)) {
+          missingFields.push(`child[${index}].section`);
+        }
+        if (!cleanText(item?.rollNumber)) {
+          missingFields.push(`child[${index}].rollNumber`);
+        }
       });
     }
 
-    const registerDeviceId =
-      getRegisterOtpDeviceId(parentPhone);
+    if (missingFields.length) {
+      finishTiming(res, apiStartedAt, databaseTime);
+      return res.status(400).json({
+        success: false,
+        message: "Required fields missing",
+        missingFields,
+      });
+    }
 
-    const readStartedAt = performance.now();
+    const childrenDataArray = children.map((item) => ({
+      studentId: cleanText(item.studentId),
+      name: cleanText(item.name),
+      class: cleanText(item.class),
+      section: cleanText(item.section),
+      rollNumber: cleanText(item.rollNumber),
+      busNumber: cleanText(item.busNumber),
+      pickupPointId:
+        item.pickupPointId === undefined || item.pickupPointId === null
+          ? null
+          : cleanText(item.pickupPointId) || null,
+      status: {
+        active: item?.status?.active !== false,
+      },
+    }));
 
-    const [schoolExists, registeredParent] =
+    const studentIds = childrenDataArray.map((item) => item.studentId);
+
+    if (new Set(studentIds).size !== studentIds.length) {
+      finishTiming(res, apiStartedAt, databaseTime);
+      return res.status(409).json({
+        success: false,
+        message: "Duplicate studentId exists in the submitted child array",
+      });
+    }
+
+    const checkStartedAt = performance.now();
+
+    const [schoolExists, existingParent, existingStudent] =
       await Promise.all([
-        School.exists({
-          schoolId,
-        }),
-
+        School.exists({ schoolId }),
         User.exists({
           schoolId,
           "parent.phone": parentPhone,
-          "children.0": {
-            $exists: true,
-          },
+          "status.active": true,
+        }),
+        User.exists({
+          schoolId,
+          "children.studentId": { $in: studentIds },
         }),
       ]);
 
-    databaseTime +=
-      performance.now() - readStartedAt;
+    databaseTime += performance.now() - checkStartedAt;
 
     if (!schoolExists) {
       finishTiming(res, apiStartedAt, databaseTime);
-
       return res.status(404).json({
         success: false,
         message: "School not found",
       });
     }
 
-    if (registeredParent) {
+    if (existingParent) {
       finishTiming(res, apiStartedAt, databaseTime);
-
       return res.status(409).json({
         success: false,
-        message:
-          "This parent phone is already registered",
+        message: "This parent phone is already registered in this school",
       });
     }
 
-    const otp = createOtp();
-    const expiresAt = new Date(
-      Date.now() + 10 * 60 * 1000,
-    );
+    if (existingStudent) {
+      finishTiming(res, apiStartedAt, databaseTime);
+      return res.status(409).json({
+        success: false,
+        message: "One or more submitted student IDs already exist",
+      });
+    }
 
     const writeStartedAt = performance.now();
 
-    /*
-    Existing temporary parent:
-    Replace only its registration OTP.
-    */
-    let result = await User.updateOne(
-      {
-        schoolId,
-        "parent.phone": parentPhone,
-        "children.0": {
-          $exists: false,
-        },
+    const createdParent = await User.create({
+      parentId: generateId("PAR"),
+      schoolId,
+      parent: {
+        name: parentName,
+        phone: parentPhone,
       },
-      [
-        {
-          $set: {
-            otpRequests: {
-              $concatArrays: [
-                {
-                  $filter: {
-                    input: {
-                      $ifNull: [
-                        "$otpRequests",
-                        [],
-                      ],
-                    },
-                    as: "request",
-                    cond: {
-                      $ne: [
-                        "$$request.deviceId",
-                        registerDeviceId,
-                      ],
-                    },
-                  },
-                },
-                [
-                  {
-                    deviceId:
-                      registerDeviceId,
-                    code: otp,
-                    expiresAt,
-                    attempts: 0,
-                  },
-                ],
-              ],
-            },
-          },
-        },
-      ],
-    );
-
-    /*
-    No temporary parent exists:
-    Create only a temporary record containing zero children.
-    */
-    if (result.matchedCount === 0) {
-      try {
-        await User.create({
-          parentId: generateId("PAR"),
-          schoolId,
-          parent: {
-            name: "TEMP",
-            phone: parentPhone,
-          },
-          children: [],
-          otpRequests: [
-            {
-              deviceId:
-                registerDeviceId,
-              code: otp,
-              expiresAt,
-              attempts: 0,
-            },
-          ],
-          devices: [],
-          status: {
-            active: true,
-          },
-        });
-      } catch (error) {
-        /*
-        Handles two simultaneous requests safely.
-        */
-        if (error?.code !== 11000) {
-          throw error;
-        }
-
-        result = await User.updateOne(
-          {
-            schoolId,
-            "parent.phone": parentPhone,
-            "children.0": {
-              $exists: false,
-            },
-          },
-          [
-            {
-              $set: {
-                otpRequests: [
-                  {
-                    deviceId:
-                      registerDeviceId,
-                    code: otp,
-                    expiresAt,
-                    attempts: 0,
-                  },
-                ],
-              },
-            },
-          ],
-        );
-
-        if (result.matchedCount === 0) {
-          finishTiming(
-            res,
-            apiStartedAt,
-            databaseTime,
-          );
-
-          return res.status(409).json({
-            success: false,
-            message:
-              "This parent phone is already registered",
-          });
-        }
-      }
-    }
-
-    databaseTime +=
-      performance.now() - writeStartedAt;
-
-    /*
-    Replace console OTP with your SMS provider.
-    */
-    console.log(
-      `Register OTP for ${parentPhone}: ${otp}`,
-    );
-
-    finishTiming(res, apiStartedAt, databaseTime);
-
-    return res.status(200).json({
-      success: true,
-      message: "Registration OTP sent successfully",
-
-      /*
-      Remove otp from production response after SMS integration.
-      */
-      data: {
-        otp,
-        expiresInSeconds: 600,
+      children: childrenDataArray,
+      otpRequests: [],
+      devices: [],
+      status: {
+        active: true,
       },
     });
-  } catch (error) {
-    finishTiming(res, apiStartedAt, databaseTime);
 
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to send registration OTP",
-      error: error.message,
-    });
-  }
-};
+    databaseTime += performance.now() - writeStartedAt;
 
-/*
-===============================================================================
-2. VERIFY REGISTER OTP
-===============================================================================
-
-Purpose:
-- Verify the OTP.
-- Consume the OTP so it cannot be reused.
-- Return a short-lived registrationToken.
-- This token is required by createStudent.
-*/
-exports.verifyRegisterOTP = async (req, res) => {
-  const apiStartedAt = performance.now();
-  let databaseTime = 0;
-
-  try {
-    const { schoolId } = req.user;
-    const parentPhone = normalizePhone(
-      req.body.parentPhone,
-    );
-    const otp = String(req.body.otp || "").trim();
-
-    if (
-      !schoolId ||
-      !/^[6-9]\d{9}$/.test(parentPhone) ||
-      !/^\d{6}$/.test(otp)
-    ) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "schoolId, valid parentPhone and 6-digit otp are required",
-      });
-    }
-
-    const registerDeviceId =
-      getRegisterOtpDeviceId(parentPhone);
-    const now = new Date();
-
-    const readStartedAt = performance.now();
-
-    const user = await User.findOne(
-      {
-        schoolId,
-        "parent.phone": parentPhone,
-        "children.0": {
-          $exists: false,
-        },
-      },
-      {
-        _id: 1,
-        parentId: 1,
-        otpRequests: {
-          $elemMatch: {
-            deviceId:
-              registerDeviceId,
-          },
-        },
-      },
-    ).lean();
-
-    databaseTime +=
-      performance.now() - readStartedAt;
-
-    if (!user) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(404).json({
-        success: false,
-        message:
-          "Registration request not found",
-      });
-    }
-
-    const otpRequest =
-      user.otpRequests?.[0];
-
-    if (!otpRequest) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Registration OTP was not requested",
-      });
-    }
-
-    if (
-      !otpRequest.expiresAt ||
-      new Date(otpRequest.expiresAt) <= now
-    ) {
-      const cleanupStartedAt =
-        performance.now();
-
-      await User.updateOne(
-        {
-          _id: user._id,
-        },
-        {
-          $pull: {
-            otpRequests: {
-              deviceId:
-                registerDeviceId,
-            },
-          },
-        },
-      );
-
-      databaseTime +=
-        performance.now() -
-        cleanupStartedAt;
-
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Registration OTP expired",
-      });
-    }
-
-    if ((otpRequest.attempts || 0) >= 5) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(429).json({
-        success: false,
-        message:
-          "Too many incorrect OTP attempts",
-      });
-    }
-
-    if (
-      String(otpRequest.code) !== otp
-    ) {
-      const attemptStartedAt =
-        performance.now();
-
-      const attemptResult =
-        await User.findOneAndUpdate(
-          {
-            _id: user._id,
-            otpRequests: {
-              $elemMatch: {
-                deviceId:
-                  registerDeviceId,
-                attempts: {
-                  $lt: 5,
-                },
-              },
-            },
-          },
-          {
-            $inc: {
-              "otpRequests.$.attempts": 1,
-            },
-          },
-          {
-            new: true,
-            projection: {
-              otpRequests: {
-                $elemMatch: {
-                  deviceId:
-                    registerDeviceId,
-                },
-              },
-            },
-            lean: true,
-          },
-        );
-
-      databaseTime +=
-        performance.now() -
-        attemptStartedAt;
-
-      const updatedAttempts =
-        attemptResult
-          ?.otpRequests?.[0]
-          ?.attempts ||
-        (otpRequest.attempts || 0) + 1;
-
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(401).json({
-        success: false,
-        message: "Invalid OTP",
-        attemptsRemaining:
-          Math.max(
-            0,
-            5 - updatedAttempts,
-          ),
-      });
-    }
-
-    /*
-    Consume the exact OTP atomically.
-    */
-    const consumeStartedAt =
-      performance.now();
-
-    const consumeResult =
-      await User.updateOne(
-        {
-          _id: user._id,
-          otpRequests: {
-            $elemMatch: {
-              deviceId:
-                registerDeviceId,
-              code: otp,
-              expiresAt: {
-                $gt: now,
-              },
-              attempts: {
-                $lt: 5,
-              },
-            },
-          },
-        },
-        {
-          $pull: {
-            otpRequests: {
-              deviceId:
-                registerDeviceId,
-            },
-          },
-        },
-      );
-
-    databaseTime +=
-      performance.now() -
-      consumeStartedAt;
-
-    if (consumeResult.modifiedCount === 0) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "OTP is invalid, expired or already used",
-      });
-    }
-
-    /*
-    The token is tied to:
-    - schoolId
-    - parentPhone
-    - purpose
-    - temporary parent record
-
-    It expires after 10 minutes.
-    */
-    const registrationToken = jwt.sign(
-      {
-        purpose:
-          "STUDENT_REGISTRATION",
-        schoolId,
-        parentPhone,
-        parentRecordId:
-          String(user._id),
-      },
-      getRegisterTokenSecret(),
-      {
-        expiresIn: "10m",
-      },
-    );
+    const responseData = createdParent.toObject();
+    delete responseData.otpRequests;
+    delete responseData.devices;
 
     finishTiming(res, apiStartedAt, databaseTime);
-
-    return res.status(200).json({
-      success: true,
-      verified: true,
-      message:
-        "Registration OTP verified successfully",
-      data: {
-        registrationToken,
-        expiresInSeconds: 600,
-      },
-    });
-  } catch (error) {
-    finishTiming(res, apiStartedAt, databaseTime);
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to verify registration OTP",
-      error: error.message,
-    });
-  }
-};
-
-/*
-===============================================================================
-3. CREATE STUDENT
-===============================================================================
-
-Required request:
-
-Headers:
-Authorization: Bearer SCHOOL_TOKEN
-
-Body:
-{
-  "registrationToken": "TOKEN_FROM_VERIFY_REGISTER_OTP",
-  "parent": {
-    "name": "Rahul Sharma",
-    "phone": "9876543210"
-  },
-  "child": [
-    {
-      "studentId": "STD001",
-      "name": "Aryan Sharma",
-      "class": "5",
-      "section": "A",
-      "rollNumber": "12"
-    }
-  ]
-}
-*/
-exports.createStudent = async (req, res) => {
-  const apiStartedAt = performance.now();
-  let databaseTime = 0;
-
-  try {
-    const { schoolId } = req.user;
-    const {
-      registrationToken,
-      parent,
-      child,
-    } = req.body;
-
-    const parentPhone = normalizePhone(
-      parent?.phone,
-    );
-
-    const missingFields = [];
-
-    if (!schoolId) {
-      missingFields.push("schoolId");
-    }
-
-    if (!registrationToken) {
-      missingFields.push(
-        "registrationToken",
-      );
-    }
-
-    if (!parent?.name) {
-      missingFields.push("parent.name");
-    }
-
-    if (
-      !/^[6-9]\d{9}$/.test(parentPhone)
-    ) {
-      missingFields.push(
-        "valid parent.phone",
-      );
-    }
-
-    if (
-      !Array.isArray(child) ||
-      child.length === 0
-    ) {
-      missingFields.push(
-        "child array",
-      );
-    } else {
-      child.forEach(
-        (item, index) => {
-          if (!item.studentId) {
-            missingFields.push(
-              `child[${index}].studentId`,
-            );
-          }
-
-          if (!item.name) {
-            missingFields.push(
-              `child[${index}].name`,
-            );
-          }
-
-          if (!item.class) {
-            missingFields.push(
-              `child[${index}].class`,
-            );
-          }
-
-          if (!item.section) {
-            missingFields.push(
-              `child[${index}].section`,
-            );
-          }
-
-          if (!item.rollNumber) {
-            missingFields.push(
-              `child[${index}].rollNumber`,
-            );
-          }
-        },
-      );
-    }
-
-    if (missingFields.length) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Required fields missing",
-        missingFields,
-      });
-    }
-
-    let verifiedRegistration;
-
-    try {
-      verifiedRegistration =
-        jwt.verify(
-          registrationToken,
-          getRegisterTokenSecret(),
-        );
-    } catch (error) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(401).json({
-        success: false,
-        message:
-          error.name ===
-          "TokenExpiredError"
-            ? "Registration verification token expired. Verify OTP again."
-            : "Invalid registration verification token",
-      });
-    }
-
-    if (
-      verifiedRegistration.purpose !==
-        "STUDENT_REGISTRATION" ||
-      verifiedRegistration.schoolId !==
-        schoolId ||
-      normalizePhone(
-        verifiedRegistration.parentPhone,
-      ) !== parentPhone
-    ) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(403).json({
-        success: false,
-        message:
-          "Registration token does not match this school or parent phone",
-      });
-    }
-
-    const childrenDataArray =
-      child.map((item) => ({
-        studentId: item.studentId,
-        name: item.name,
-        class: item.class,
-        section: item.section,
-        rollNumber:
-          item.rollNumber,
-        busNumber:
-          item.busNumber || "",
-        pickupPointId:
-          item.pickupPointId ??
-          null,
-        status: {
-          active: true,
-        },
-      }));
-
-    const studentIds =
-      childrenDataArray.map(
-        (item) =>
-          String(item.studentId),
-      );
-
-    if (
-      new Set(studentIds).size !==
-      studentIds.length
-    ) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "Duplicate studentId exists in the submitted child array",
-      });
-    }
-
-    const writeStartedAt =
-      performance.now();
-
-    /*
-    Only the same temporary parent record created during OTP
-    request can be converted into the real parent account.
-    */
-    const createdParent =
-      await User.findOneAndUpdate(
-        {
-          _id:
-            verifiedRegistration
-              .parentRecordId,
-          schoolId,
-          "parent.phone":
-            parentPhone,
-          "children.0": {
-            $exists: false,
-          },
-        },
-        {
-          $set: {
-            "parent.name":
-              parent.name,
-            "parent.phone":
-              parentPhone,
-            children:
-              childrenDataArray,
-            otpRequests: [],
-            status: {
-              active: true,
-            },
-          },
-        },
-        {
-          new: true,
-          runValidators: true,
-          lean: true,
-        },
-      );
-
-    databaseTime +=
-      performance.now() -
-      writeStartedAt;
-
-    if (!createdParent) {
-      finishTiming(res, apiStartedAt, databaseTime);
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "Student account was already created or the registration request is no longer valid",
-      });
-    }
-
-    finishTiming(res, apiStartedAt, databaseTime);
-
     return res.status(201).json({
       success: true,
       message:
-        "Parent and student account created successfully",
-      data: createdParent,
+        "Parent and student account created successfully without OTP",
+      data: responseData,
     });
   } catch (error) {
     finishTiming(res, apiStartedAt, databaseTime);
@@ -835,26 +240,18 @@ exports.createStudent = async (req, res) => {
     if (error?.code === 11000) {
       return res.status(409).json({
         success: false,
-        message:
-          "Parent phone, parent ID or student record already exists",
+        message: "Parent ID, phone or student record already exists",
       });
     }
 
     return res.status(500).json({
       success: false,
-      message:
-        "Unable to create student account",
+      message: "Unable to create student account",
       error: error.message,
     });
   }
 };
 
-
-/*
-===============================================================================
-4. ADD CHILD
-===============================================================================
-*/
 exports.addChild = async (req, res) => {
   const apiStartedAt = performance.now();
   let databaseTime = 0;
@@ -1030,24 +427,35 @@ exports.sendOTP = async (req, res) => {
   let databaseTime = 0;
 
   try {
-    const { parentPhone, deviceId } = req.body;
-    const { schoolId } = req.user;
+    const { parentPhone, deviceId, schoolId } = req.body;
+
+    console.log("SEND OTP REQUEST");
+    console.log({
+      schoolId,
+      parentPhone,
+      deviceId,
+    });
 
     if (!schoolId || !parentPhone || !deviceId) {
       finishTiming(res, apiStartedAt, databaseTime);
+
       return res.status(400).json({
         success: false,
-        message: "parentPhone and deviceId are required",
+        message: "schoolId, parentPhone and deviceId are required",
       });
     }
+
+    const cleanSchoolId = schoolId.toString().trim();
+    const cleanParentPhone = parentPhone.toString().trim();
+    const cleanDeviceId = deviceId.toString().trim();
 
     const now = new Date();
     const readStart = performance.now();
 
     const existingUser = await User.findOne(
       {
-        schoolId,
-        "parent.phone": parentPhone,
+        schoolId: cleanSchoolId,
+        "parent.phone": cleanParentPhone,
         "status.active": true,
       },
       {
@@ -1055,7 +463,7 @@ exports.sendOTP = async (req, res) => {
         parentId: 1,
         otpRequests: {
           $elemMatch: {
-            deviceId,
+            deviceId: cleanDeviceId,
             expiresAt: { $gt: now },
             attempts: { $lt: 5 },
           },
@@ -1067,16 +475,22 @@ exports.sendOTP = async (req, res) => {
 
     if (!existingUser) {
       finishTiming(res, apiStartedAt, databaseTime);
+
       return res.status(404).json({
         success: false,
-        message: "Parent account not found",
+        message: "Parent account not found for selected school",
       });
     }
 
     if (existingUser.otpRequests?.length) {
       const existingOtp = existingUser.otpRequests[0];
 
+      console.log(
+        `Existing OTP reused for ${cleanParentPhone}, device ${cleanDeviceId}`,
+      );
+
       finishTiming(res, apiStartedAt, databaseTime);
+
       return res.status(200).json({
         success: true,
         message: "Existing OTP sent again",
@@ -1095,12 +509,9 @@ exports.sendOTP = async (req, res) => {
 
     const otp = createOtp();
     const expiresAt = new Date(Date.now() + 60 * 1000);
+
     const updateStart = performance.now();
 
-    /*
-    One update pipeline replaces this device's old OTP and appends the new OTP.
-    This removes the previous two sequential updateOne calls.
-    */
     const result = await User.updateOne(
       {
         _id: existingUser._id,
@@ -1113,14 +524,21 @@ exports.sendOTP = async (req, res) => {
               $concatArrays: [
                 {
                   $filter: {
-                    input: { $ifNull: ["$otpRequests", []] },
+                    input: {
+                      $ifNull: ["$otpRequests", []],
+                    },
                     as: "request",
-                    cond: { $ne: ["$$request.deviceId", deviceId] },
+                    cond: {
+                      $ne: [
+                        "$$request.deviceId",
+                        cleanDeviceId,
+                      ],
+                    },
                   },
                 },
                 [
                   {
-                    deviceId,
+                    deviceId: cleanDeviceId,
                     code: otp,
                     expiresAt,
                     attempts: 0,
@@ -1131,32 +549,42 @@ exports.sendOTP = async (req, res) => {
           },
         },
       ],
+      {
+        updatePipeline: true,
+      },
     );
 
     databaseTime += performance.now() - updateStart;
 
     if (!result.matchedCount) {
       finishTiming(res, apiStartedAt, databaseTime);
+
       return res.status(404).json({
         success: false,
         message: "Parent account not found",
       });
     }
 
-    console.log(`New OTP for ${parentPhone}, device ${deviceId}: ${otp}`);
+    console.log(
+      `New OTP for ${cleanParentPhone}, device ${cleanDeviceId}: ${otp}`,
+    );
 
     finishTiming(res, apiStartedAt, databaseTime);
+
     return res.status(200).json({
       success: true,
       message: "OTP sent successfully",
       data: {
-        otp,
+       
         reusedOtp: false,
         expiresInSeconds: 60,
       },
     });
   } catch (error) {
+    console.error("SEND OTP ERROR:", error);
+
     finishTiming(res, apiStartedAt, databaseTime);
+
     return res.status(500).json({
       success: false,
       message: "Unable to send OTP",
@@ -1165,24 +593,180 @@ exports.sendOTP = async (req, res) => {
   }
 };
 
+
+// POST /api/student/find-schools
+exports.findSchoolsByParentPhone = async (req, res) => {
+  const apiStartedAt = performance.now();
+  let databaseTime = 0;
+
+  try {
+    const parentPhone = req.body.parentPhone?.toString().trim();
+
+    if (!parentPhone) {
+      finishTiming(res, apiStartedAt, databaseTime);
+console.log("Parent phone number is required");
+      return res.status(400).json({
+        success: false,
+        message: "Parent phone number is required",
+      });
+    }
+
+    /*
+      Step 1:
+      Find every active parent account connected with this phone number.
+
+      distinct() automatically returns unique school IDs, so duplicate
+      records from the same school do not create duplicate school cards.
+    */
+    const userReadStartedAt = performance.now();
+
+    const schoolIds = await User.distinct("schoolId", {
+      "parent.phone": parentPhone,
+      "status.active": true,
+      schoolId: {
+        $exists: true,
+        $nin: [null, ""],
+      },
+    });
+
+    databaseTime += performance.now() - userReadStartedAt;
+
+    if (!schoolIds.length) {
+      finishTiming(res, apiStartedAt, databaseTime);
+console.log("No active parent account found with this phone number");
+
+      return res.status(404).json({
+        success: false,
+        message: "No active parent account found with this phone number",
+        data: {
+          hasSingleSchool: false,
+          requiresSchoolSelection: false,
+          totalSchools: 0,
+          schools: [],
+        },
+      });
+    }
+
+    /*
+      Step 2:
+      Get only the information needed by the school selection screen.
+    */
+    const schoolReadStartedAt = performance.now();
+
+    const schools = await School.find(
+      {
+        schoolId: { $in: schoolIds },
+        isVerified: true,
+      },
+      {
+        _id: 0,
+        schoolId: 1,
+        name: 1,
+        "address.city": 1,
+        "address.state": 1,
+      },
+    )
+      .sort({ name: 1 })
+      .lean();
+
+    databaseTime += performance.now() - schoolReadStartedAt;
+
+    if (!schools.length) {
+      finishTiming(res, apiStartedAt, databaseTime);
+
+      return res.status(404).json({
+        success: false,
+        message: "No verified school found for this parent account",
+        data: {
+          hasSingleSchool: false,
+          requiresSchoolSelection: false,
+          totalSchools: 0,
+          schools: [],
+        },
+      });
+    }
+
+    const formattedSchools = schools.map((school) => ({
+      schoolId: school.schoolId,
+      schoolName: school.name,
+      city: school.address?.city || "",
+      state: school.address?.state || "",
+    }));
+
+    const hasSingleSchool = formattedSchools.length === 1;
+
+    finishTiming(res, apiStartedAt, databaseTime);
+console.log(hasSingleSchool,200);
+
+    return res.status(200).json({
+      success: true,
+      message: hasSingleSchool
+          ? "One school account found"
+          : "Multiple school accounts found",
+      data: {
+        hasSingleSchool,
+        requiresSchoolSelection: !hasSingleSchool,
+        totalSchools: formattedSchools.length,
+
+        /*
+          When only one school exists, the frontend can directly use this ID.
+        */
+        selectedSchoolId: hasSingleSchool
+            ? formattedSchools[0].schoolId
+            : null,
+
+        schools: formattedSchools,
+      },
+    });
+  } catch (error) {
+    finishTiming(res, apiStartedAt, databaseTime);
+console.log(error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to find schools for this parent",
+      error: error.message,
+    });
+  }
+};
 /*
 ===============================================================================
 7. VERIFY LOGIN OTP
 ===============================================================================
 */
+
+
 exports.verifyOTP = async (req, res) => {
   const apiStartedAt = performance.now();
   let databaseTime = 0;
 
   try {
-    const { parentPhone, deviceId, otp, fcmToken } = req.body;
-    const { schoolId } = req.user;
+    const {
+      parentPhone,
+      deviceId,
+      otp,
+      fcmToken,
+      schoolId,
+    } = req.body;
 
-    if (!schoolId || !parentPhone || !deviceId || !otp || !fcmToken) {
+    const cleanSchoolId = cleanText(schoolId);
+    const cleanParentPhone = normalizePhone(parentPhone);
+    const cleanDeviceId = cleanText(deviceId);
+    const cleanOtp = cleanText(otp);
+    const cleanFcmToken = cleanText(fcmToken);
+
+    if (
+      !cleanSchoolId ||
+      !/^[6-9]\d{9}$/.test(cleanParentPhone) ||
+      !cleanDeviceId ||
+      !/^\d{6}$/.test(cleanOtp) ||
+      !cleanFcmToken
+    ) {
       finishTiming(res, apiStartedAt, databaseTime);
       return res.status(400).json({
         success: false,
-        message: "parentPhone, deviceId, otp and fcmToken are required",
+        message:
+          "schoolId, valid parentPhone, deviceId, 6-digit otp and fcmToken are required",
       });
     }
 
@@ -1191,8 +775,8 @@ exports.verifyOTP = async (req, res) => {
 
     const user = await User.findOne(
       {
-        schoolId,
-        "parent.phone": parentPhone,
+        schoolId: cleanSchoolId,
+        "parent.phone": cleanParentPhone,
         "status.active": true,
       },
       {
@@ -1201,7 +785,9 @@ exports.verifyOTP = async (req, res) => {
         parent: 1,
         children: 1,
         otpRequests: {
-          $elemMatch: { deviceId },
+          $elemMatch: {
+            deviceId: cleanDeviceId,
+          },
         },
       },
     ).lean();
@@ -1228,13 +814,19 @@ exports.verifyOTP = async (req, res) => {
 
     if (!otpRequest.expiresAt || new Date(otpRequest.expiresAt) <= now) {
       const cleanupStart = performance.now();
+
       await User.updateOne(
         { _id: user._id },
-        { $pull: { otpRequests: { deviceId } } },
+        {
+          $pull: {
+            otpRequests: { deviceId: cleanDeviceId },
+          },
+        },
       );
-      databaseTime += performance.now() - cleanupStart;
 
+      databaseTime += performance.now() - cleanupStart;
       finishTiming(res, apiStartedAt, databaseTime);
+
       return res.status(400).json({
         success: false,
         message: "OTP expired. Please request a new OTP.",
@@ -1243,20 +835,26 @@ exports.verifyOTP = async (req, res) => {
 
     if ((otpRequest.attempts || 0) >= 5) {
       const cleanupStart = performance.now();
+
       await User.updateOne(
         { _id: user._id },
-        { $pull: { otpRequests: { deviceId } } },
+        {
+          $pull: {
+            otpRequests: { deviceId: cleanDeviceId },
+          },
+        },
       );
-      databaseTime += performance.now() - cleanupStart;
 
+      databaseTime += performance.now() - cleanupStart;
       finishTiming(res, apiStartedAt, databaseTime);
+
       return res.status(429).json({
         success: false,
         message: "Too many incorrect attempts. Request a new OTP.",
       });
     }
 
-    if (String(otpRequest.code) !== String(otp)) {
+    if (String(otpRequest.code) !== cleanOtp) {
       const attemptStart = performance.now();
 
       const attemptResult = await User.findOneAndUpdate(
@@ -1264,7 +862,8 @@ exports.verifyOTP = async (req, res) => {
           _id: user._id,
           otpRequests: {
             $elemMatch: {
-              deviceId,
+              deviceId: cleanDeviceId,
+              expiresAt: { $gt: now },
               attempts: { $lt: 5 },
             },
           },
@@ -1278,7 +877,7 @@ exports.verifyOTP = async (req, res) => {
           new: true,
           projection: {
             otpRequests: {
-              $elemMatch: { deviceId },
+              $elemMatch: { deviceId: cleanDeviceId },
             },
           },
           lean: true,
@@ -1299,21 +898,29 @@ exports.verifyOTP = async (req, res) => {
       });
     }
 
-    const consumeStart = performance.now();
+    const { token, tokenExpiry } = createDeviceSession({
+      userId: user._id,
+      parentId: user.parentId,
+      schoolId: user.schoolId,
+      deviceId: cleanDeviceId,
+    });
+
+    const saveStartedAt = performance.now();
 
     /*
-    One atomic update pipeline:
-    - consumes the OTP
-    - updates an existing device token
-    - or appends the device when it does not exist
+    One atomic MongoDB operation:
+    - consumes this device's OTP
+    - replaces only this device's old session
+    - keeps all other device sessions untouched
+    - returns the updated record for storage verification
     */
-    const loginResult = await User.updateOne(
+    const updatedUser = await User.findOneAndUpdate(
       {
         _id: user._id,
         otpRequests: {
           $elemMatch: {
-            deviceId,
-            code: String(otp),
+            deviceId: cleanDeviceId,
+            code: cleanOtp,
             expiresAt: { $gt: now },
             attempts: { $lt: 5 },
           },
@@ -1326,7 +933,9 @@ exports.verifyOTP = async (req, res) => {
               $filter: {
                 input: { $ifNull: ["$otpRequests", []] },
                 as: "request",
-                cond: { $ne: ["$$request.deviceId", deviceId] },
+                cond: {
+                  $ne: ["$$request.deviceId", cleanDeviceId],
+                },
               },
             },
             devices: {
@@ -1335,20 +944,42 @@ exports.verifyOTP = async (req, res) => {
                   $filter: {
                     input: { $ifNull: ["$devices", []] },
                     as: "device",
-                    cond: { $ne: ["$$device.deviceId", deviceId] },
+                    cond: {
+                      $ne: ["$$device.deviceId", cleanDeviceId],
+                    },
                   },
                 },
-                [{ deviceId, fcmToken }],
+                [
+                  {
+                    deviceId: cleanDeviceId,
+                    fcmToken: cleanFcmToken,
+                    token,
+                    tokenExpiry,
+                    lastLoginAt: now,
+                  },
+                ],
               ],
             },
           },
         },
       ],
+      {
+        new: true,
+        updatePipeline: true,
+        lean: true,
+        projection: {
+          parentId: 1,
+          schoolId: 1,
+          parent: 1,
+          children: 1,
+          devices: 1,
+        },
+      },
     );
 
-    databaseTime += performance.now() - consumeStart;
+    databaseTime += performance.now() - saveStartedAt;
 
-    if (!loginResult.modifiedCount) {
+    if (!updatedUser) {
       finishTiming(res, apiStartedAt, databaseTime);
       return res.status(400).json({
         success: false,
@@ -1356,20 +987,42 @@ exports.verifyOTP = async (req, res) => {
       });
     }
 
+    const storedDevice = updatedUser.devices?.find(
+      (device) => String(device.deviceId) === cleanDeviceId,
+    );
+
+    if (
+      !storedDevice ||
+      storedDevice.token !== token ||
+      !storedDevice.tokenExpiry
+    ) {
+      throw new Error(
+        "Token was generated but was not stored against this device in MongoDB",
+      );
+    }
+
     finishTiming(res, apiStartedAt, databaseTime);
     return res.status(200).json({
-      success: true,
-      message: "OTP verified and login successful",
-      data: {
-        parentId: user.parentId,
-        schoolId: user.schoolId,
-        parent: user.parent,
-        children: user.children,
-        deviceId,
-      },
-    });
+  success: true,
+  message: "OTP verified and login successful",
+
+  token,
+  tokenExpiry,
+  loginRole: "parent",
+  sessionStored: true,
+
+  data: {
+    parentId: updatedUser.parentId,
+    schoolId: updatedUser.schoolId,
+    parent: updatedUser.parent,
+    children: updatedUser.children,
+    deviceId: cleanDeviceId,
+  },
+});
   } catch (error) {
+    console.error("VERIFY OTP ERROR:", error);
     finishTiming(res, apiStartedAt, databaseTime);
+
     return res.status(500).json({
       success: false,
       message: "Unable to verify OTP",
@@ -1378,11 +1031,6 @@ exports.verifyOTP = async (req, res) => {
   }
 };
 
-/*
-===============================================================================
-8. RESEND OTP
-===============================================================================
-*/
 exports.resendOTP = async (req, res) => {
   // Same optimized workflow and response contract as sendOTP.
   return exports.sendOTP(req, res);
@@ -1974,54 +1622,46 @@ exports.saveFcmToken = async (req, res) => {
   let databaseTime = 0;
 
   try {
-    const { parentId, deviceId, fcmToken } = req.body;
-    const { schoolId } = req.user;
+    const schoolId = req.user?.schoolId;
+    const parentId = cleanText(req.user?.parentId);
+    const deviceId = cleanText(req.user?.deviceId);
+    const fcmToken = cleanText(req.body.fcmToken);
 
     if (!schoolId || !parentId || !deviceId || !fcmToken) {
       finishTiming(res, apiStartedAt, databaseTime);
       return res.status(400).json({
         success: false,
-        message: "parentId, deviceId and fcmToken are required",
+        message: "Valid parent session and fcmToken are required",
       });
     }
 
     const dbStart = performance.now();
 
-    /*
-    One update pipeline removes the old device record and appends the latest
-    token, replacing find -> JavaScript array scan -> save.
-    */
     const user = await User.findOneAndUpdate(
       {
         parentId,
         schoolId,
         "status.active": true,
-      },
-      [
-        {
-          $set: {
-            devices: {
-              $concatArrays: [
-                {
-                  $filter: {
-                    input: { $ifNull: ["$devices", []] },
-                    as: "device",
-                    cond: { $ne: ["$$device.deviceId", deviceId] },
-                  },
-                },
-                [{ deviceId, fcmToken }],
-              ],
-            },
+        devices: {
+          $elemMatch: {
+            deviceId,
+            token: { $nin: [null, ""] },
+            tokenExpiry: { $gt: new Date() },
           },
         },
-      ],
+      },
+      {
+        $set: {
+          "devices.$.fcmToken": fcmToken,
+        },
+      },
       {
         new: true,
+        lean: true,
         projection: {
           _id: 0,
           parentId: 1,
         },
-        lean: true,
       },
     );
 
@@ -2031,41 +1671,48 @@ exports.saveFcmToken = async (req, res) => {
       finishTiming(res, apiStartedAt, databaseTime);
       return res.status(404).json({
         success: false,
-        message: "Parent account not found",
+        message: "Active device session not found",
       });
     }
 
     finishTiming(res, apiStartedAt, databaseTime);
     return res.status(200).json({
       success: true,
-      message: "Device FCM token saved successfully",
+      message: "FCM token updated for the current device",
       data: {
-        parentId: user.parentId,
+        parentId,
         deviceId,
       },
     });
-  } catch (err) {
+  } catch (error) {
     finishTiming(res, apiStartedAt, databaseTime);
     return res.status(500).json({
       success: false,
       message: "Unable to save FCM token",
-      error: err.message,
+      error: error.message,
     });
   }
 };
 
-/*
-===============================================================================
-13. LOGOUT DEVICE
-===============================================================================
-*/
 exports.logoutDevice = async (req, res) => {
   const apiStartedAt = performance.now();
   let databaseTime = 0;
 
   try {
-    const { parentId, deviceId } = req.body;
-    const { schoolId } = req.user;
+    const schoolId = req.user?.schoolId;
+    const isParentSession = req.user?.role === "parent";
+
+    /*
+    Parent route: always use IDs from the verified JWT.
+    Authority route: use IDs supplied in the request body.
+    */
+    const parentId = isParentSession
+      ? cleanText(req.user?.parentId)
+      : cleanText(req.body.parentId);
+
+    const deviceId = isParentSession
+      ? cleanText(req.user?.deviceId)
+      : cleanText(req.body.deviceId);
 
     if (!schoolId || !parentId || !deviceId) {
       finishTiming(res, apiStartedAt, databaseTime);
@@ -2081,6 +1728,7 @@ exports.logoutDevice = async (req, res) => {
       {
         parentId,
         schoolId,
+        "devices.deviceId": deviceId,
       },
       {
         $pull: {
@@ -2095,37 +1743,94 @@ exports.logoutDevice = async (req, res) => {
       finishTiming(res, apiStartedAt, databaseTime);
       return res.status(404).json({
         success: false,
-        message: "Parent account not found",
+        message: "This device session was not found",
       });
     }
 
     finishTiming(res, apiStartedAt, databaseTime);
     return res.status(200).json({
       success: true,
-      message: result.modifiedCount
-        ? "Current device logged out successfully"
-        : "Device was already logged out",
+      message: "Selected device logged out successfully",
       data: {
         parentId,
         deviceId,
         deviceRemoved: result.modifiedCount > 0,
       },
     });
-  } catch (err) {
+  } catch (error) {
     finishTiming(res, apiStartedAt, databaseTime);
     return res.status(500).json({
       success: false,
       message: "Unable to logout device",
-      error: err.message,
+      error: error.message,
     });
   }
 };
 
-/*
-===============================================================================
-14. GET PARENT BY ID
-===============================================================================
-*/
+exports.getLoggedInDevices = async (req, res) => {
+  try {
+    const schoolId = req.user?.schoolId;
+    const isParentSession = req.user?.role === "parent";
+
+    const parentId = isParentSession
+      ? cleanText(req.user?.parentId)
+      : cleanText(req.params.parentId);
+
+    if (!schoolId || !parentId) {
+      return res.status(400).json({
+        success: false,
+        message: "parentId is required",
+      });
+    }
+
+    const parent = await User.findOne(
+      {
+        schoolId,
+        parentId,
+        "status.active": true,
+      },
+      {
+        _id: 0,
+        parentId: 1,
+        devices: 1,
+      },
+    ).lean();
+
+    if (!parent) {
+      return res.status(404).json({
+        success: false,
+        message: "Parent account not found",
+      });
+    }
+
+    const now = new Date();
+
+    const devices = (parent.devices || []).map((device) => ({
+      deviceId: device.deviceId,
+      lastLoginAt: device.lastLoginAt || null,
+      tokenExpiry: device.tokenExpiry || null,
+      active:
+        Boolean(device.token) &&
+        Boolean(device.tokenExpiry) &&
+        new Date(device.tokenExpiry) > now,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        parentId: parent.parentId,
+        devices,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch logged-in devices",
+      error: error.message,
+    });
+  }
+};
+
 exports.getParentById = async (req, res) => {
   const apiStartedAt = performance.now();
   let databaseTime = 0;
@@ -2135,10 +1840,10 @@ exports.getParentById = async (req, res) => {
     const { schoolId } = req.user;
     const dbStart = performance.now();
 
-    const user = await User.findOne({
-      parentId,
-      schoolId,
-    }).lean();
+    const user = await User.findOne(
+      { parentId, schoolId },
+      { otpRequests: 0, "devices.token": 0 },
+    ).lean();
 
     databaseTime += performance.now() - dbStart;
 

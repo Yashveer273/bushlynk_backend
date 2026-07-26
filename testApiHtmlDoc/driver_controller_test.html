@@ -436,7 +436,7 @@
         path: "/login",
         auth: false,
         description: "Mobile app login using schoolId and phone.",
-        body: { schoolId: "SCH-YTFTY", phone: "9627068854" }
+        body: { schoolId: "YTFTY", phone: "9627068854" }
       },
       {
         name: "Start Driver Job",
@@ -445,7 +445,7 @@
         auth: false,
         description: "Start or claim a selected bus from the driver app or admin web.",
         body: {
-          schoolId: "SCH-YTFTY",
+          schoolId: "YTFTY",
           driverId: "DRV-001",
           password: "1234",
           busNumber: "UP15AB123"
@@ -458,7 +458,7 @@
         auth: false,
         description: "Stop the selected bus owned by the driver.",
         body: {
-          schoolId: "SCH-YTFTY",
+          schoolId: "YTFTY",
           driverId: "DRV-001",
           password: "1234",
           busNumber: "UP15AB123"
@@ -471,7 +471,7 @@
         auth: false,
         description: "Check whether a bus is free, occupied by this driver, or occupied by another driver.",
         body: {
-          schoolId: "SCH-YTFTY",
+          schoolId: "YTFTY",
           driverId: "DRV-001",
           busNumber: "UP15AB123"
         }
@@ -482,7 +482,7 @@
         path: "/getDefaultAssignedBus",
         auth: false,
         description: "Fetch the driver's configured default bus.",
-        body: { schoolId: "SCH-YTFTY", driverId: "DRV-001" }
+        body: { schoolId: "YTFTY", driverId: "DRV-001" }
       },
       {
         name: "Login History",
@@ -490,7 +490,7 @@
         path: "/login-history",
         auth: false,
         description: "Fetch the driver's login history for the last 30 days.",
-        body: { schoolId: "SCH-YTFTY", driverId: "DRV-001" }
+        body: { schoolId: "YTFTY", driverId: "DRV-001" }
       },
       {
         name: "Create Driver",
