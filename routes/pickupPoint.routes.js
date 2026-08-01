@@ -9,11 +9,17 @@ const {
   removePickupPoint,
   addPickupPoint,
   editPickupPoint,
-  changeBusId,updateSinglePickupPointStatus,
-  removeCompleteBusPickupPoints,createPickupPointByDriver,
-  getPaginatedBusesWithPickupPoints,admin_getPickupPointsByBus,driver_getPickupPointsByBus,getPickupPointById
+  changeBusId,
+  updateSinglePickupPointStatus,
+  removeCompleteBusPickupPoints,
+  createPickupPointByDriver,
+  getPaginatedBusesWithPickupPoints,
+  admin_getPickupPointsByBus,
+  driver_getPickupPointsByBus,
+  admingetPickupPointById,
+  getPickupPointById,
 } = require("../controllers/pickupPoint.Controller");
-const { auth,driverAuth } = require("../middlewares/school.auth");
+const { auth, driverAuth,verifyParentToken } = require("../middlewares/school.auth");
 /*
 ==================================================
 1. CREATE PICKUP POINT
@@ -46,25 +52,18 @@ Thunder Client Body:
   }
 }
 */
+router.get("/admin/pickup-points/:id", auth, admingetPickupPointById);
 router.get(
-  "/pickup-points/:id",
-  auth,
- getPickupPointById
+  "/mypickup-point/:busNumber/:pickupPointId",
+  verifyParentToken,
+  getPickupPointById,
 );
 router.post("/create", auth, createPickupPoint);
 router.post("/Driver_create", driverAuth, createPickupPointByDriver);
 router.post("/change_draft_status", auth, updateSinglePickupPointStatus);
 router.put("/edit", auth, editPickupPoint);
-router.get(
-  "/get-buses-paginated",
-  auth,
-  getPaginatedBusesWithPickupPoints,
-);
-router.get(
-  "/get-pickup-points/:busNumber",
-  auth,
-  admin_getPickupPointsByBus,
-);
+router.get("/get-buses-paginated", auth, getPaginatedBusesWithPickupPoints);
+router.get("/get-pickup-points/:busNumber", auth, admin_getPickupPointsByBus);
 
 router.get(
   "/driver_get-pickup-points/:busNumber",

@@ -662,8 +662,8 @@ console.log("No active parent account found with this phone number");
         _id: 0,
         schoolId: 1,
         name: 1,
-        "address.city": 1,
-        "address.state": 1,
+        "address": 1,
+        "address": 1,
       },
     )
       .sort({ name: 1 })
@@ -689,8 +689,7 @@ console.log("No active parent account found with this phone number");
     const formattedSchools = schools.map((school) => ({
       schoolId: school.schoolId,
       schoolName: school.name,
-      city: school.address?.city || "",
-      state: school.address?.state || "",
+      schoolAddress: school.address
     }));
 
     const hasSingleSchool = formattedSchools.length === 1;

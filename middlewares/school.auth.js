@@ -2,7 +2,8 @@ const jwt = require("jsonwebtoken");
 const Driver = require("../models/Driver");
 const School = require("../models/School");
 const User = require("../models/students");
-
+const JWT_SECRET="0000000";
+const JWT_EXPIRES_IN="30d";
 exports.auth = async (req, res, next) => {
 
   try {
@@ -166,14 +167,15 @@ exports.verifyParentToken = async (req, res, next) => {
 
     const token = authorization.slice(7).trim();
 
-    if (!token || !process.env.JWT_SECRET) {
+    if (!token || !JWT_SECRET) {
+      console.log(JWT_SECRET, "JWT", token);
       return res.status(401).json({
         success: false,
         message: "Invalid token configuration",
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
 
     if (decoded.role !== "parent" || !decoded.deviceId) {
       return res.status(403).json({

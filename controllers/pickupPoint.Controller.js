@@ -3,6 +3,7 @@ const User = require("../models/students");
 const generateId = require("../utils/generateId");
 const redisClient = require("../config/redis");
 const { performance } = require("node:perf_hooks");
+const mongoose = require("mongoose");
 
 const clean = (value) => String(value || "").trim();
 const cleanBus = (value) => clean(value).toUpperCase();
@@ -1218,7 +1219,7 @@ GET PICKUP POINT BY ID
 MongoDB extracts only matching embedded point
 ==================================================
 */
-exports.getPickupPointById = async (req, res) => {
+exports.admingetPickupPointById = async (req, res) => {
   try {
     const schoolId = clean(req.user?.schoolId);
     const pickupPointId = clean(req.params?.id);
@@ -1275,6 +1276,57 @@ exports.getPickupPointById = async (req, res) => {
   }
 };
 
+
+exports.getPickupPointById = async (req, res) => {
+  try {
+    const schoolId = String(req.user?.schoolId ?? "").trim();
+    const busNumber = String(req.params?.busNumber ?? "").trim();
+    const pickupPointId = String(
+      req.params?.pickupPointId ?? "",
+    ).trim();
+
+    const result = await PickupPoint.findOne(
+      {
+        schoolId,
+        busNumber,
+        pickupPoints: {
+          $elemMatch: {
+            pickupPointId,
+            status: "PUBLISHED",
+          },
+        },
+      },
+      {
+        _id: 0,
+        "pickupPoints.$": 1,
+      },
+    ).lean();
+
+    const point = result?.pickupPoints?.[0];
+
+    if (!point) {
+      return res.status(404).json({
+        success: false,
+        message: "Published pickup point not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        name: point.name,
+        coordinates: point.location?.coordinates ?? [],
+      },
+    });
+  } catch (error) {
+    console.error("getPickupPointById:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+};
 /*
 ==================================================
 ADMIN GET PICKUP POINTS BY BUS

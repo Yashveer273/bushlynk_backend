@@ -78,7 +78,7 @@ async function startServer() {
     START KAFKA CONSUMER
     =====================================
     */
-    await startConsumer();
+    // await startConsumer();
     startRetryWorker();
     let ip = "192.168.1.7";
     app.listen(3000, ip, () => {
