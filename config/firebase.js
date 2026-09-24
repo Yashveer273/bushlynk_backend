@@ -8,7 +8,7 @@ try {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL:
-      "https://easzauth-default-rtdb.firebaseio.com/",
+      "https://grozar-default-rtdb.firebaseio.com/",
   });
 
   db = admin.database();

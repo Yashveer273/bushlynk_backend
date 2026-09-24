@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Android Notification UI Showcase</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Hide scrollbars for clean phone mockup */
+        .scrollbar-none::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-none {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row items-center justify-center p-4 sm:p-8 font-sans selection:bg-amber-500 selection:text-white">
+
+    <!-- Control Panel / Sidebar -->
+    <div class="w-full lg:w-80 bg-slate-900 border border-slate-800 rounded-2xl p-5 mb-8 lg:mb-0 lg:mr-8 shadow-2xl flex flex-col justify-between">
+        <div>
+            <div class="flex items-center space-x-2 text-amber-400 font-bold text-lg mb-4">
+                <i data-lucide="bus" class="w-5 h-5"></i>
+                <span>Scenario Controller</span>
+            </div>
+            <p class="text-xs text-slate-400 mb-6 leading-relaxed">
+                Switch between trip states to test how the notification card adapts for Pickups, Transit to School, and Return Drop-offs.
+            </p>
+
+            <div class="space-y-2 mb-6">
+                <div class="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2">Select Scenario</div>
+                <div id="scenario-buttons" class="space-y-2">
+                    <!-- Injected via JS -->
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <button 
+                    onclick="resetDemo()"
+                    class="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium py-2 px-3 rounded-lg transition-colors flex items-center justify-between cursor-pointer"
+                >
+                    <span>Reset Notification Card</span>
+                    <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="text-[11px] text-slate-500 mt-6 pt-4 border-t border-slate-800 flex items-center justify-between">
+            <span>Vanilla HTML / Tailwind Ready</span>
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        </div>
+    </div>
+
+    <!-- Phone Emulator Frame -->
+    <div class="relative w-full max-w-[390px] h-[800px] bg-black rounded-[52px] p-3 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9),0_0_0_12px_#1e293b,0_0_0_15px_#0f172a] flex flex-col overflow-hidden select-none">
+        
+        <!-- Speaker notch & camera punch-hole bezel -->
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-black rounded-b-2xl z-50 flex items-center justify-center">
+            <div class="w-3 h-3 bg-slate-900 rounded-full border border-slate-800 mr-4"></div>
+            <div class="w-12 h-1.5 bg-slate-800 rounded-full"></div>
+        </div>
+
+        <!-- Screen Content -->
+        <div class="relative w-full h-full bg-[#f4eff4] text-slate-900 rounded-[42px] overflow-y-auto flex flex-col pt-8 px-4 pb-6 scrollbar-none shadow-inner">
+            
+            <!-- Status Bar -->
+            <div class="flex justify-between items-center px-3 mb-4 text-xs font-medium tracking-wide text-slate-800">
+                <span id="clock-time">4:22</span>
+                <div class="flex items-center space-x-2">
+                    <span class="text-[10px]">5G</span>
+                    <span class="text-[10px]">100%</span>
+                </div>
+            </div>
+
+            <!-- Quick Scenario Switcher Pill -->
+            <div class="bg-white/70 backdrop-blur-md rounded-full px-3 py-1 mb-4 flex items-center justify-between border border-white/80 shadow-xs">
+                <span class="text-[10px] font-bold text-slate-700 uppercase tracking-wider">Mode:</span>
+                <div class="flex space-x-1" id="pill-switcher">
+                    <!-- Injected via JS -->
+                </div>
+            </div>
+
+            <!-- Notification List Container -->
+            <div class="flex flex-col space-y-3.5 flex-1" id="notification-container">
+                <!-- Injected via JS -->
+            </div>
+
+            <!-- Bottom Action Footer -->
+            <div class="mt-4 pt-3 flex items-center justify-between px-1">
+                <button 
+                    onclick="alert('Opening transport management details.')"
+                    class="bg-[#dedbe2] hover:bg-[#d2cfd8] text-slate-700 text-xs font-medium py-2 px-5 rounded-full transition-colors active:scale-95 shadow-2xs cursor-pointer"
+                >
+                    Manage
+                </button>
+                <button 
+                    onclick="dismissNotification()"
+                    class="bg-[#dedbe2] hover:bg-[#d2cfd8] text-slate-700 text-xs font-medium py-2 px-5 rounded-full transition-colors active:scale-95 shadow-2xs cursor-pointer"
+                >
+                    Clear all
+                </button>
+            </div>
+
+            <!-- Android Navigation Home Bar -->
+            <div class="w-32 h-1 bg-slate-400/60 rounded-full mx-auto mt-6"></div>
+
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        const SCENARIOS = {
+            PICKUP: {
+                id: "PICKUP",
+                label: "1. Pickup En Route",
+                appName: "School Bus Live Tracker",
+                iconColor: "bg-amber-500",
+                title: "Your child's bus is on the way!",
+                busId: "UP001",
+                busAssignedNumber: "Bus 42",
+                busRegistrationNumber: "UP-80-AB-1234",
+                schoolName: "Oakridge International School",
+                driverName: "Robert Fox",
+                driverId: "DRV-8902",
+                driverPhone: "+91 98765 43210",
+                busToPickupDist: "850m away",
+                busToPickupEta: "4 mins",
+                compactSummary: "850m away • 4 mins",
+                rangeMessage: "Bus entered 1km range (4 mins left)",
+                userToBusDist: "970m apart",
+            },
+            TO_SCHOOL: {
+                id: "TO_SCHOOL",
+                label: "2. En Route to School",
+                appName: "School Bus Live Tracker",
+                iconColor: "bg-indigo-500",
+                title: "Student is safely on board heading to school",
+                busId: "UP001",
+                busAssignedNumber: "Bus 42",
+                busRegistrationNumber: "UP-80-AB-1234",
+                schoolName: "Oakridge International School",
+                driverName: "Robert Fox",
+                driverId: "DRV-8902",
+                driverPhone: "+91 98765 43210",
+                busToSchoolDist: "4.2 km away",
+                busToSchoolEta: "12 mins to school",
+                busSpeed: "38 km/h",
+                compactSummary: "4.2 km away • 12 mins",
+                statusIndicator: "Bus is heading towards school",
+            },
+            DROP_OFF: {
+                id: "DROP_OFF",
+                label: "3. Drop-off En Route",
+                appName: "School Bus Live Tracker",
+                iconColor: "bg-emerald-500",
+                title: "Bus is on the way to drop off your child",
+                busId: "UP001",
+                busAssignedNumber: "Bus 42",
+                busRegistrationNumber: "UP-80-AB-1234",
+                schoolName: "Oakridge International School",
+                driverName: "Robert Fox",
+                driverId: "DRV-8902",
+                driverPhone: "+91 98765 43210",
+                busToDropDist: "650m away",
+                busToDropEta: "3 mins",
+                compactSummary: "650m away • 3 mins",
+                rangeMessage: "Bus entered 1km drop-off zone",
+                userToBusDist: "750m apart",
+            }
+        };
+
+        let activeScenario = "PICKUP";
+        let expanded = true;
+        let dismissed = false;
+
+        function updateClock() {
+            const now = new Date();
+            let hours = now.getHours();
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            document.getElementById('clock-time').textContent = `${hours}:${minutes}`;
+        }
+        setInterval(updateClock, 10000);
+        updateClock();
+
+        function switchScenario(id) {
+            activeScenario = id;
+            dismissed = false;
+            expanded = true;
+            render();
+        }
+
+        function toggleExpand() {
+            expanded = !expanded;
+            render();
+        }
+
+        function dismissNotification() {
+            dismissed = true;
+            render();
+        }
+
+        function resetDemo() {
+            dismissed = false;
+            expanded = true;
+            render();
+        }
+
+        function render() {
+            const sData = SCENARIOS[activeScenario];
+
+            // Render Sidebar Scenario Buttons
+            const sbContainer = document.getElementById('scenario-buttons');
+            sbContainer.innerHTML = Object.values(SCENARIOS).map(s => `
+                <button
+                    onclick="switchScenario('${s.id}')"
+                    class="w-full text-left text-xs py-2.5 px-3 rounded-xl transition-all font-medium flex items-center justify-between cursor-pointer ${
+                        activeScenario === s.id 
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm' 
+                            : 'bg-slate-800/60 hover:bg-slate-800 text-slate-400 border border-transparent'
+                    }"
+                >
+                    <span>${s.label}</span>
+                    ${activeScenario === s.id ? '<span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>' : ''}
+                </button>
+            `).join('');
+
+            // Render Pill Switcher
+            const pillContainer = document.getElementById('pill-switcher');
+            pillContainer.innerHTML = Object.keys(SCENARIOS).map(key => `
+                <button
+                    onclick="switchScenario('${key}')"
+                    class="text-[10px] px-2 py-0.5 rounded-full font-semibold transition-all cursor-pointer ${
+                        activeScenario === key ? 'bg-amber-500 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                    }"
+                >
+                    ${key === 'PICKUP' ? 'Pickup' : key === 'TO_SCHOOL' ? 'School' : 'Drop'}
+                </button>
+            `).join('');
+
+            // Render Notification Card / Dismissed State
+            const notifContainer = document.getElementById('notification-container');
+            if (dismissed) {
+                notifContainer.innerHTML = `
+                    <div class="flex flex-col items-center justify-center flex-1 text-slate-400 py-12 text-center">
+                        <i data-lucide="bell" class="w-10 h-10 mb-2 opacity-40"></i>
+                        <p class="text-xs font-medium">All caught up! No active alerts.</p>
+                    </div>
+                `;
+            } else {
+                notifContainer.innerHTML = `
+                    <div class="bg-[#e9e6ec] rounded-[28px] p-4 shadow-sm transition-all duration-300 border border-white/60 flex flex-col relative group hover:shadow-md">
+                        
+                        <!-- Header -->
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center space-x-2">
+                                <div class="w-6 h-6 rounded-full ${sData.iconColor} flex items-center justify-center shadow-sm text-white">
+                                    <i data-lucide="bus" class="w-3.5 h-3.5"></i>
+                                </div>
+                                <div>
+                                    <span class="text-[11px] font-bold text-slate-800 tracking-tight block leading-tight">
+                                        ${sData.appName} <span class="font-normal text-slate-500">• Just now</span>
+                                    </span>
+                                    <span class="text-[10px] font-medium text-amber-700">${sData.schoolName}</span>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center space-x-1">
+                                <button 
+                                    onclick="toggleExpand()"
+                                    class="p-1 text-slate-500 hover:text-slate-800 rounded-full hover:bg-slate-300/40 transition-colors cursor-pointer"
+                                    title="${expanded ? "Collapse" : "Expand"}"
+                                >
+                                    <i data-lucide="${expanded ? 'chevron-up' : 'chevron-down'}" class="w-4 h-4"></i>
+                                </button>
+                                <button 
+                                    onclick="dismissNotification()"
+                                    class="p-1 text-slate-400 hover:text-rose-600 rounded-full hover:bg-slate-300/40 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                                    title="Dismiss"
+                                >
+                                    <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Body -->
+                        <div class="pl-1">
+                            <div class="text-xs font-bold text-slate-900 mb-1 flex items-center gap-1.5">
+                                <span class="w-2 h-2 rounded-full ${activeScenario === 'TO_SCHOOL' ? 'bg-indigo-500' : 'bg-amber-500'} animate-pulse"></span>
+                                ${sData.title}
+                            </div>
+
+                            <!-- Compact View -->
+                            ${!expanded ? `
+                                <div class="text-xs text-slate-600 flex justify-between items-center bg-white/40 p-2 rounded-xl mt-1">
+                                    <span class="font-semibold text-slate-700">Bus ${sData.busAssignedNumber} (${sData.busId})</span>
+                                    <span class="font-mono font-medium text-indigo-600">${sData.compactSummary}</span>
+                                </div>
+                            ` : `
+                                <!-- Expanded View -->
+                                <div class="mt-3 space-y-2.5">
+                                    
+                                    <!-- Bus & Driver Info -->
+                                    <div class="bg-white/70 rounded-2xl p-3 grid grid-cols-1 gap-2.5 text-xs border border-white/60">
+                                        
+                                        <!-- Bus Details -->
+                                        <div class="flex items-center justify-between pb-2 border-b border-slate-200/60">
+                                            <div class="flex items-start space-x-2">
+                                                <div class="p-1.5 bg-amber-100 text-amber-800 rounded-xl mt-0.5 shrink-0">
+                                                    <i data-lucide="bus" class="w-4 h-4"></i>
+                                                </div>
+                                                <div>
+                                                    <div class="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Bus Details</div>
+                                                    <div class="font-bold text-slate-900 text-xs">
+                                                        ${sData.busAssignedNumber} &bull; ${sData.busId}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <span class="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded-lg border border-slate-200">
+                                                ${sData.busRegistrationNumber}
+                                            </span>
+                                        </div>
+
+                                        <!-- Driver Details -->
+                                        <div class="flex items-center justify-between pt-0.5">
+                                            <div class="flex items-start space-x-2">
+                                                <div class="p-1.5 bg-slate-200 text-slate-700 rounded-xl mt-0.5 shrink-0">
+                                                    <i data-lucide="user" class="w-4 h-4"></i>
+                                                </div>
+                                                <div>
+                                                    <div class="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Driver Details</div>
+                                                    <div class="font-bold text-slate-900 text-xs leading-snug">
+                                                        ${sData.driverName}
+                                                    </div>
+                                                    <div class="text-[10px] text-slate-500 font-mono">
+                                                        ${sData.driverId}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="text-[11px] font-mono text-slate-700 flex items-center gap-1.5 font-medium bg-slate-100 px-2 py-1 rounded-lg border border-slate-200/80">
+                                                <i data-lucide="phone" class="w-3 h-3 text-slate-500"></i>
+                                                <span>${sData.driverPhone}</span>
+                                            </div>
+                                        </div>
+
+                                    </div>
+
+                                    <!-- Scenario Metrics -->
+                                    <div class="bg-gradient-to-br from-amber-500/15 to-orange-500/10 rounded-2xl p-3 border border-amber-500/20 space-y-2 text-xs">
+                                        ${activeScenario === 'TO_SCHOOL' ? `
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center space-x-1.5 text-slate-700">
+                                                    <i data-lucide="school" class="w-3.5 h-3.5 text-indigo-600 shrink-0"></i>
+                                                    <span class="font-semibold">Distance to school:</span>
+                                                </div>
+                                                <div class="text-right">
+                                                    <span class="font-mono font-bold text-indigo-700">${sData.busToSchoolDist}</span>
+                                                    <span class="text-[10px] text-slate-500 ml-1">(${sData.busToSchoolEta})</span>
+                                                </div>
+                                            </div>
+
+                                            <div class="flex items-center justify-between pt-1.5 border-t border-amber-500/20">
+                                                <div class="flex items-center space-x-1.5 text-slate-700">
+                                                    <i data-lucide="navigation" class="w-3.5 h-3.5 text-amber-600 shrink-0"></i>
+                                                    <span class="font-semibold">Current speed:</span>
+                                                </div>
+                                                <span class="font-mono font-bold text-amber-700">${sData.busSpeed}</span>
+                                            </div>
+
+                                            <div class="flex items-center justify-between pt-1.5 border-t border-amber-500/20">
+                                                <div class="flex items-center space-x-1.5 text-slate-700">
+                                                    <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
+                                                    <span class="font-semibold">Trip Status:</span>
+                                                </div>
+                                                <span class="text-emerald-900 bg-emerald-100/90 px-2 py-0.5 rounded-lg font-medium text-[10px]">
+                                                    ${sData.statusIndicator}
+                                                </span>
+                                            </div>
+                                        ` : `
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center space-x-1.5 text-slate-700">
+                                                    <i data-lucide="map-pin" class="w-3.5 h-3.5 text-amber-600 shrink-0"></i>
+                                                    <span class="font-semibold">Bus distance to stop:</span>
+                                                </div>
+                                                <div class="text-right">
+                                                    <span class="font-mono font-bold text-amber-700">
+                                                        ${activeScenario === 'PICKUP' ? sData.busToPickupDist : sData.busToDropDist}
+                                                    </span>
+                                                    <span class="text-[10px] text-slate-500 ml-1">
+                                                        (${activeScenario === 'PICKUP' ? sData.busToPickupEta : sData.busToDropEta})
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div class="flex items-center justify-between pt-1.5 border-t border-amber-500/20">
+                                                <div class="flex items-center space-x-1.5 text-slate-700">
+                                                    <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
+                                                    <span class="font-semibold">1 km range status:</span>
+                                                </div>
+                                                <span class="text-emerald-900 bg-emerald-100/90 px-2 py-1 rounded-lg font-medium text-[10px] text-right">
+                                                    ${sData.rangeMessage}
+                                                </span>
+                                            </div>
+
+                                            <div class="flex items-center justify-between pt-1.5 border-t border-amber-500/20">
+                                                <div class="flex items-center space-x-1.5 text-slate-700">
+                                                    <i data-lucide="navigation" class="w-3.5 h-3.5 text-indigo-600 shrink-0"></i>
+                                                    <span class="font-semibold">Your location to bus:</span>
+                                                </div>
+                                                <span class="font-mono font-bold text-indigo-700">
+                                                    ${sData.userToBusDist}
+                                                </span>
+                                            </div>
+                                        `}
+                                    </div>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Re-initialize Lucide icons for newly injected DOM elements
+            lucide.createIcons();
+        }
+
+        // Initial render
+        render();
+    </script>
+</body>
+</html>

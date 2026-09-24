@@ -5,7 +5,7 @@ const cors = require("cors");
 const startConsumer = require("./kafka/consumer");
 require("./config/firebase");
 const { loadPickupPoints } = require("./services/loadpicups_in_redis");
-
+const busNotificationRoutes = require('./routes/notification_Of_Bus_Start.routes');
 const app = express();
 
 app.use(
@@ -42,9 +42,25 @@ app.use("/api/school", require("./routes/school.routes"));
 app.use("/api/driver", require("./routes/driver.routes"));
 app.use("/api/student", require("./routes/user.routes"));
 
+
+// Add this after app.use(express.json()) in your existing index.js.
+app.use('/api/bus-notification', busNotificationRoutes);
+
 app.use("/api/subscription", require("./routes/subscription.routes"));
 app.use("/api/bus", require("./routes/bus.routes"));
 app.use("/api/pickupPoint", require("./routes/pickupPoint.routes"));
+
+app.use((error, req, res, next) => {
+  if (error?.type === "entity.parse.failed") {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid JSON body. Send raw JSON without wrapping the object in quotes.",
+    });
+  }
+
+  return next(error);
+});
+
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
@@ -81,7 +97,7 @@ async function startServer() {
     // await startConsumer();
     startRetryWorker();
     let ip = "192.168.1.7";
-    app.listen(3000, ip, () => {
+    app.listen(5000,  () => {
       console.log("✅ Server running on",ip);
     });
   } catch (err) {
