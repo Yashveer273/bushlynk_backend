@@ -94,11 +94,11 @@ async function startServer() {
     START KAFKA CONSUMER
     =====================================
     */
-    // await startConsumer();
+    await startConsumer();
     startRetryWorker();
-    let ip = "192.168.1.7";
+    
     app.listen(5000,  () => {
-      console.log("✅ Server running on",ip);
+      console.log("✅ Server running on");
     });
   } catch (err) {
     console.log("❌ Server Error:", err);

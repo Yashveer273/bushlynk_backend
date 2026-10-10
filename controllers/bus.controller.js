@@ -1,7 +1,7 @@
 const Bus = require("../models/Bus");
 const School = require("../models/School");
 const Driver = require("../models/Driver");
-const User = require("../models/students");
+const User = require("../models/Students");
 
 /*
 ============================================================

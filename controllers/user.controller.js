@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const { performance } = require("node:perf_hooks");
 const JWT_SECRET="0000000";
 const JWT_EXPIRES_IN="30d";
-const User = require("../models/students");
+const User = require("../models/Students");
 const School = require("../models/School");
 const PickupPoint = require("../models/PickupPoint");
 

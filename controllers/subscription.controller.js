@@ -7,7 +7,7 @@ const PickupPoint =
   require("../models/PickupPoint");
 
 const User =
-  require("../models/students");
+  require("../models/Students");
 
 const {
   addSubscriptionToRedis,

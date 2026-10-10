@@ -1,5 +1,5 @@
 const PickupPoint = require("../models/PickupPoint");
-const User = require("../models/students");
+const User = require("../models/Students");
 const generateId = require("../utils/generateId");
 const redisClient = require("../config/redis");
 const { performance } = require("node:perf_hooks");

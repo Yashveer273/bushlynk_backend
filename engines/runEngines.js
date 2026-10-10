@@ -1,6 +1,6 @@
 const { getPickupPoints } = require("../services/loadpicups_in_redis");
 
-const User = require("../models/students");
+const User = require("../models/Students");
 
 const {
   canSendAlert,

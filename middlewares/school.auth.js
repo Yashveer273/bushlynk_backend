@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const Driver = require("../models/Driver");
 const School = require("../models/School");
-const User = require("../models/students");
+const User = require("../models/Students");
 const JWT_SECRET="0000000";
 const JWT_EXPIRES_IN="30d";
 exports.auth = async (req, res, next) => {
